@@ -47,7 +47,9 @@ enum class TokenType {
     AT,
 
     // F-string tokens
-    FSTRING_START, FSTRING_MIDDLE, FSTRING_END
+    FSTRING_START, FSTRING_MIDDLE, FSTRING_END,
+    // Special token for f-string conversion specifier
+    EXCLAIM  // ! in f-strings (for !s, !r, !a)
 };
 
 // Compile-time token tag for type-safe operations
@@ -148,6 +150,9 @@ private:
         int quote_size;       // 1 for single quote, 3 for triple quote
         bool raw;             // true for raw f-strings (rf or fr)
         int curly_brace_depth; // Track nesting depth for expressions
+        int curly_brace_expr_start_depth; // Depth when current expression started (-1 if none)
+        bool in_format_spec;  // Are we in format specifier mode (after : in expression)?
+        bool has_format_spec; // Have we seen : at the top-level expression?
     };
     std::vector<FStringState> fstring_stack_;  // Stack for nested f-strings
 
@@ -430,6 +435,9 @@ inline Token Tokenizer::read_fstring_start() {
     state.quote_size = quote_size;
     state.raw = is_raw;
     state.curly_brace_depth = 0;
+    state.curly_brace_expr_start_depth = -1;  // -1 means no active expression
+    state.in_format_spec = false;
+    state.has_format_spec = false;
     fstring_stack_.push_back(state);
 
     // Read initial string content until { or end quote
@@ -544,6 +552,20 @@ inline Token Tokenizer::read_fstring_middle() {
             }
         }
 
+        // Check for } (end of expression or format spec)
+        if (!escaped && c == '}') {
+            if (position_ + 1 < source_.length() && source_[position_ + 1] == '}') {
+                // Literal }} - emit single }
+                value += '}';
+                position_ += 2;
+                column_ += 2;
+                continue;
+            } else {
+                // End of expression or format spec - stop reading
+                break;
+            }
+        }
+
         // Handle escape sequences
         if (escaped) {
             if (state.raw && c != state.quote && c != '\\') {
@@ -606,12 +628,7 @@ inline Token Tokenizer::next_token() {
     char c = source_[position_];
     size_t start_col = column_;
 
-    // Numbers
-    if (std::isdigit(c)) {
-        return read_number();
-    }
-
-    // Check if we're in an f-string
+    // Check if we're in an f-string (MUST be before number check!)
     if (!fstring_stack_.empty()) {
         FStringState& state = fstring_stack_.back();
 
@@ -637,6 +654,14 @@ inline Token Tokenizer::next_token() {
                 return read_fstring_middle();
             } else {
                 // Start of expression - increment depth and emit LBRACE
+                if (state.in_format_spec) {
+                    // Nested expression in format spec - exit format spec mode
+                    state.in_format_spec = false;
+                }
+                if (state.curly_brace_depth == 0) {
+                    // This is the start of a new top-level expression
+                    state.curly_brace_expr_start_depth = 0;
+                }
                 state.curly_brace_depth++;
                 position_++;
                 column_++;
@@ -646,12 +671,24 @@ inline Token Tokenizer::next_token() {
 
         // Check for } - end of expression (if depth matches)
         if (c == '}') {
-            if (position_ + 1 < source_.length() && source_[position_ + 1] == '}') {
+            // Check for literal }} - only when NOT inside an expression (depth == 0)
+            if (state.curly_brace_depth == 0 && 
+                position_ + 1 < source_.length() && source_[position_ + 1] == '}') {
                 // Literal }} - handled in read_fstring_middle
                 return read_fstring_middle();
             } else if (state.curly_brace_depth > 0) {
                 // End of expression - decrement depth and emit RBRACE
                 state.curly_brace_depth--;
+                if (state.curly_brace_depth == 0) {
+                    // End of top-level expression
+                    state.in_format_spec = false;
+                    state.has_format_spec = false;
+                    state.curly_brace_expr_start_depth = -1;
+                } else if (state.has_format_spec && 
+                           state.curly_brace_depth - 1 == state.curly_brace_expr_start_depth) {
+                    // We're back at the format spec level after a nested expression
+                    state.in_format_spec = true;
+                }
                 position_++;
                 column_++;
                 return Token(TokenType::RBRACE, "}", line_, start_col);
@@ -663,8 +700,30 @@ inline Token Tokenizer::next_token() {
             }
         }
 
+        // Check for : at the expression start depth (format specifier)
+        // This must be checked BEFORE falling through to normal tokenization
+        if (c == ':' && state.curly_brace_depth > 0 && 
+            state.curly_brace_depth - 1 == state.curly_brace_expr_start_depth) {
+            // This is the format specifier colon
+            state.in_format_spec = true;
+            state.has_format_spec = true;  // Remember we've seen :
+            position_++;
+            column_++;
+            return Token(TokenType::COLON, ":", line_, start_col);
+        }
+
+        // If we're inside an expression (depth > 0) and NOT in format spec, tokenize normally
         // Otherwise, read f-string middle (literal text)
-        return read_fstring_middle();
+        if (state.curly_brace_depth > 0 && !state.in_format_spec) {
+            // We're inside an expression - fall through to normal tokenization
+        } else {
+            return read_fstring_middle();
+        }
+    }
+
+    // Numbers (checked after f-string to allow format specs like "0>5")
+    if (std::isdigit(c)) {
+        return read_number();
     }
 
     // Check for f-string prefix before quote
@@ -767,6 +826,12 @@ inline Token Tokenizer::next_token() {
                 position_++; column_++;
                 return Token(TokenType::NOT_EQUAL, "!=", line_, start_col);
             }
+            // In f-string expression context, ! is for conversion specifiers (!s, !r, !a)
+            if (!fstring_stack_.empty() && fstring_stack_.back().curly_brace_depth > 0) {
+                return Token(TokenType::EXCLAIM, "!", line_, start_col);
+            }
+            // Standalone ! is not valid in Python (only != is valid)
+            // But we'll tokenize it as NOT for error reporting
             return Token(TokenType::NOT, "!", line_, start_col);
         case '|':
             position_++; column_++;

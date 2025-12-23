@@ -949,8 +949,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_atom() {
         return std::make_shared<ast::Constant>(token.value, token.line, token.column);
     } else if (match(TokenType::STRING)) {
         return std::make_shared<ast::Constant>(token.value, token.line, token.column);
-    } else if (match(TokenType::FSTRING_START)) {
-        // F-string
+    } else if (current().type == TokenType::FSTRING_START) {
+        // F-string - don't use match() because parse_fstring() expects to see FSTRING_START
         return parse_fstring();
     } else if (match(TokenType::TRUE)) {
         return std::make_shared<ast::Constant>("True", token.line, token.column);
@@ -1086,11 +1086,13 @@ inline std::shared_ptr<ast::Expr> Parser::parse_formatted_value() {
     advance();
 
     // Parse expression (can be any expression, including nested f-strings)
+    // Now that we use EXCLAIM token for !, we can safely use parse_expr()
+    // which supports full Python expressions including comparisons, and, or, not
     std::shared_ptr<ast::Expr> value = parse_expr();
 
     // Parse optional conversion: !s, !r, !a
     int conversion = -1;
-    if (match(TokenType::NOT)) {
+    if (match(TokenType::EXCLAIM)) {
         if (current().type == TokenType::IDENTIFIER) {
             std::string conv_char = current().value;
             if (conv_char == "s") {
