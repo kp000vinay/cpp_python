@@ -16,10 +16,10 @@ namespace ast {
  */
 
 // Constant expression
-class Constant : public ASTNode {
+class Constant : public ASTNodeBase {
 public:
     Constant(const std::string& value, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), value_(value) {}
+        : ASTNodeBase(lineno, col_offset), value_(value) {}
 
     std::string value() const { return value_; }
     std::string to_string(int indent = 0) const override;
@@ -29,19 +29,19 @@ private:
 };
 
 // Ellipsis expression (...)
-class Ellipsis : public ASTNode {
+class Ellipsis : public ASTNodeBase {
 public:
     Ellipsis(int lineno, int col_offset)
-        : ASTNode(lineno, col_offset) {}
+        : ASTNodeBase(lineno, col_offset) {}
 
     std::string to_string(int indent = 0) const override;
 };
 
 // Name (variable reference)
-class Name : public ASTNode {
+class Name : public ASTNodeBase {
 public:
     Name(const std::string& id, ExprContext ctx, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), id_(id), ctx_(ctx) {}
+        : ASTNodeBase(lineno, col_offset), id_(id), ctx_(ctx) {}
 
     std::string id() const { return id_; }
     ExprContext ctx() const { return ctx_; }
@@ -53,11 +53,11 @@ private:
 };
 
 // Binary operation
-class BinOp : public ASTNode {
+class BinOp : public ASTNodeBase {
 public:
     BinOp(std::shared_ptr<Expr> left, Operator op, std::shared_ptr<Expr> right,
           int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), left_(left), op_(op), right_(right) {}
+        : ASTNodeBase(lineno, col_offset), left_(left), op_(op), right_(right) {}
 
     std::shared_ptr<Expr> left() const { return left_; }
     Operator op() const { return op_; }
@@ -71,11 +71,11 @@ private:
 };
 
 // Function call
-class Call : public ASTNode {
+class Call : public ASTNodeBase {
 public:
     Call(std::shared_ptr<Expr> func, std::vector<std::shared_ptr<Expr>> args,
          int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), func_(func), args_(args) {}
+        : ASTNodeBase(lineno, col_offset), func_(func), args_(args) {}
 
     std::shared_ptr<Expr> func() const { return func_; }
     const std::vector<std::shared_ptr<Expr>>& args() const { return args_; }
@@ -87,11 +87,11 @@ private:
 };
 
 // Boolean operation (and/or)
-class BoolOpExpr : public ASTNode {
+class BoolOpExpr : public ASTNodeBase {
 public:
     BoolOpExpr(ast::BoolOp op, std::vector<std::shared_ptr<Expr>> values,
                int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), op_(op), values_(values) {}
+        : ASTNodeBase(lineno, col_offset), op_(op), values_(values) {}
 
     ast::BoolOp op() const { return op_; }
     const std::vector<std::shared_ptr<Expr>>& values() const { return values_; }
@@ -103,11 +103,11 @@ private:
 };
 
 // Comparison operation
-class Compare : public ASTNode {
+class Compare : public ASTNodeBase {
 public:
     Compare(std::shared_ptr<Expr> left, CompareOp op, std::shared_ptr<Expr> right,
             int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), left_(left), op_(op), right_(right) {}
+        : ASTNodeBase(lineno, col_offset), left_(left), op_(op), right_(right) {}
 
     std::shared_ptr<Expr> left() const { return left_; }
     CompareOp op() const { return op_; }
@@ -121,7 +121,7 @@ private:
 };
 
 // Unary operation
-class UnaryOp : public ASTNode {
+class UnaryOp : public ASTNodeBase {
 public:
     enum class UnaryOpType {
         Not, UAdd, USub, Invert
@@ -129,7 +129,7 @@ public:
 
     UnaryOp(UnaryOpType op, std::shared_ptr<Expr> operand,
             int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), op_(op), operand_(operand) {}
+        : ASTNodeBase(lineno, col_offset), op_(op), operand_(operand) {}
 
     UnaryOpType op() const { return op_; }
     std::shared_ptr<Expr> operand() const { return operand_; }
@@ -141,11 +141,11 @@ private:
 };
 
 // List literal
-class List : public ASTNode {
+class List : public ASTNodeBase {
 public:
     List(std::vector<std::shared_ptr<Expr>> elts, ExprContext ctx,
          int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), elts_(elts), ctx_(ctx) {}
+        : ASTNodeBase(lineno, col_offset), elts_(elts), ctx_(ctx) {}
 
     const std::vector<std::shared_ptr<Expr>>& elts() const { return elts_; }
     ExprContext ctx() const { return ctx_; }
@@ -157,12 +157,12 @@ private:
 };
 
 // Dictionary literal
-class Dict : public ASTNode {
+class Dict : public ASTNodeBase {
 public:
     Dict(std::vector<std::shared_ptr<Expr>> keys,
          std::vector<std::shared_ptr<Expr>> values,
          int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), keys_(keys), values_(values) {}
+        : ASTNodeBase(lineno, col_offset), keys_(keys), values_(values) {}
 
     const std::vector<std::shared_ptr<Expr>>& keys() const { return keys_; }
     const std::vector<std::shared_ptr<Expr>>& values() const { return values_; }
@@ -174,11 +174,11 @@ private:
 };
 
 // Tuple literal
-class Tuple : public ASTNode {
+class Tuple : public ASTNodeBase {
 public:
     Tuple(std::vector<std::shared_ptr<Expr>> elts, ExprContext ctx,
           int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), elts_(elts), ctx_(ctx) {}
+        : ASTNodeBase(lineno, col_offset), elts_(elts), ctx_(ctx) {}
 
     const std::vector<std::shared_ptr<Expr>>& elts() const { return elts_; }
     ExprContext ctx() const { return ctx_; }
@@ -190,11 +190,11 @@ private:
 };
 
 // Attribute access (obj.attr)
-class Attribute : public ASTNode {
+class Attribute : public ASTNodeBase {
 public:
     Attribute(std::shared_ptr<Expr> value, const std::string& attr, ExprContext ctx,
               int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), value_(value), attr_(attr), ctx_(ctx) {}
+        : ASTNodeBase(lineno, col_offset), value_(value), attr_(attr), ctx_(ctx) {}
 
     std::shared_ptr<Expr> value() const { return value_; }
     std::string attr() const { return attr_; }
@@ -208,11 +208,11 @@ private:
 };
 
 // Slice (start:end:step) - can only appear in Subscript
-class Slice : public ASTNode {
+class Slice : public ASTNodeBase {
 public:
     Slice(std::shared_ptr<Expr> lower, std::shared_ptr<Expr> upper, std::shared_ptr<Expr> step,
           int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), lower_(lower), upper_(upper), step_(step) {}
+        : ASTNodeBase(lineno, col_offset), lower_(lower), upper_(upper), step_(step) {}
 
     std::shared_ptr<Expr> lower() const { return lower_; }
     std::shared_ptr<Expr> upper() const { return upper_; }
@@ -226,11 +226,11 @@ private:
 };
 
 // Subscript (obj[key] or obj[start:end:step])
-class Subscript : public ASTNode {
+class Subscript : public ASTNodeBase {
 public:
     Subscript(std::shared_ptr<Expr> value, std::shared_ptr<Expr> slice, ExprContext ctx,
               int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), value_(value), slice_(slice), ctx_(ctx) {}
+        : ASTNodeBase(lineno, col_offset), value_(value), slice_(slice), ctx_(ctx) {}
 
     std::shared_ptr<Expr> value() const { return value_; }
     std::shared_ptr<Expr> slice() const { return slice_; }
@@ -246,22 +246,6 @@ private:
 // Expr is already defined in node.hpp as ASTNode
 
 // Helper functions
-inline std::string operator_to_string(Operator op) {
-    switch (op) {
-        case Operator::Add: return "Add";
-        case Operator::Sub: return "Sub";
-        case Operator::Mult: return "Mult";
-        case Operator::Div: return "Div";
-        case Operator::Mod: return "Mod";
-        case Operator::Pow: return "Pow";
-        case Operator::BitOr: return "BitOr";
-        case Operator::BitAnd: return "BitAnd";
-        case Operator::BitXor: return "BitXor";
-        case Operator::LShift: return "LShift";
-        case Operator::RShift: return "RShift";
-        default: return "Unknown";
-    }
-}
 
 inline std::string boolop_to_string(BoolOp op) {
     switch (op) {
@@ -479,12 +463,12 @@ inline std::string Subscript::to_string(int indent) const {
 }
 
 // Lambda function (anonymous function)
-class Lambda : public ASTNode {
+class Lambda : public ASTNodeBase {
 public:
     Lambda(std::vector<std::string> args,
            std::shared_ptr<Expr> body,
            int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), args_(args), body_(body) {}
+        : ASTNodeBase(lineno, col_offset), args_(args), body_(body) {}
 
     const std::vector<std::string>& args() const { return args_; }
     std::shared_ptr<Expr> body() const { return body_; }
@@ -496,10 +480,10 @@ private:
 };
 
 // Yield expression (generator)
-class Yield : public ASTNode {
+class Yield : public ASTNodeBase {
 public:
     Yield(std::shared_ptr<Expr> value, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), value_(value) {}
+        : ASTNodeBase(lineno, col_offset), value_(value) {}
 
     std::shared_ptr<Expr> value() const { return value_; }  // nullptr if no value
     std::string to_string(int indent = 0) const override;
@@ -509,10 +493,10 @@ private:
 };
 
 // Yield from expression (generator delegation)
-class YieldFrom : public ASTNode {
+class YieldFrom : public ASTNodeBase {
 public:
     YieldFrom(std::shared_ptr<Expr> value, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), value_(value) {}
+        : ASTNodeBase(lineno, col_offset), value_(value) {}
 
     std::shared_ptr<Expr> value() const { return value_; }
     std::string to_string(int indent = 0) const override;
@@ -522,11 +506,11 @@ private:
 };
 
 // Conditional expression (ternary operator): x if condition else y
-class IfExp : public ASTNode {
+class IfExp : public ASTNodeBase {
 public:
     IfExp(std::shared_ptr<Expr> test, std::shared_ptr<Expr> body, std::shared_ptr<Expr> orelse,
           int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), test_(test), body_(body), orelse_(orelse) {}
+        : ASTNodeBase(lineno, col_offset), test_(test), body_(body), orelse_(orelse) {}
 
     std::shared_ptr<Expr> test() const { return test_; }
     std::shared_ptr<Expr> body() const { return body_; }
@@ -551,11 +535,11 @@ struct Comprehension {
 };
 
 // List comprehension: [x for x in range(10)]
-class ListComp : public ASTNode {
+class ListComp : public ASTNodeBase {
 public:
     ListComp(std::shared_ptr<Expr> elt, std::vector<Comprehension> generators,
              int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), elt_(elt), generators_(generators) {}
+        : ASTNodeBase(lineno, col_offset), elt_(elt), generators_(generators) {}
 
     std::shared_ptr<Expr> elt() const { return elt_; }
     const std::vector<Comprehension>& generators() const { return generators_; }
@@ -567,11 +551,11 @@ private:
 };
 
 // Set comprehension: {x for x in range(10)}
-class SetComp : public ASTNode {
+class SetComp : public ASTNodeBase {
 public:
     SetComp(std::shared_ptr<Expr> elt, std::vector<Comprehension> generators,
             int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), elt_(elt), generators_(generators) {}
+        : ASTNodeBase(lineno, col_offset), elt_(elt), generators_(generators) {}
 
     std::shared_ptr<Expr> elt() const { return elt_; }
     const std::vector<Comprehension>& generators() const { return generators_; }
@@ -583,12 +567,12 @@ private:
 };
 
 // Dictionary comprehension: {k: v for k, v in items}
-class DictComp : public ASTNode {
+class DictComp : public ASTNodeBase {
 public:
     DictComp(std::shared_ptr<Expr> key, std::shared_ptr<Expr> value,
              std::vector<Comprehension> generators,
              int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), key_(key), value_(value), generators_(generators) {}
+        : ASTNodeBase(lineno, col_offset), key_(key), value_(value), generators_(generators) {}
 
     std::shared_ptr<Expr> key() const { return key_; }
     std::shared_ptr<Expr> value() const { return value_; }
@@ -602,11 +586,11 @@ private:
 };
 
 // Generator expression: (x for x in range(10))
-class GeneratorExp : public ASTNode {
+class GeneratorExp : public ASTNodeBase {
 public:
     GeneratorExp(std::shared_ptr<Expr> elt, std::vector<Comprehension> generators,
                 int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), elt_(elt), generators_(generators) {}
+        : ASTNodeBase(lineno, col_offset), elt_(elt), generators_(generators) {}
 
     std::shared_ptr<Expr> elt() const { return elt_; }
     const std::vector<Comprehension>& generators() const { return generators_; }

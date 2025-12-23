@@ -7,13 +7,22 @@
 #include <cctype>
 #include <sstream>
 #include <unordered_map>
+#include <optional>
+#include <array>
+#include <concepts>
 
 namespace cpython_cpp {
 namespace parser {
 
 /**
- * Token types matching CPython's token definitions
+ * Template-based tokenizer with compile-time optimizations
  * Reference: Grammar/Tokens, Parser/tokenizer/
+ * 
+ * Uses C++ templates for:
+ * - Compile-time token type checking
+ * - Zero-cost abstractions
+ * - Constexpr keyword lookup
+ * - Type-safe token matching
  */
 enum class TokenType {
     // Keywords
@@ -38,6 +47,25 @@ enum class TokenType {
     AT
 };
 
+// Compile-time token tag for type-safe operations
+template<TokenType T>
+struct TokenTag {
+    static constexpr TokenType value = T;
+};
+
+// Type-safe token with compile-time type information
+template<TokenType Type>
+struct TypedToken {
+    static constexpr TokenType type = Type;
+    std::string value;
+    size_t line;
+    size_t column;
+    
+    TypedToken(std::string v, size_t l, size_t c)
+        : value(std::move(v)), line(l), column(c) {}
+};
+
+// Runtime token with template-based type checking
 struct Token {
     TokenType type;
     std::string value;
@@ -46,7 +74,45 @@ struct Token {
 
     Token(TokenType t, const std::string& v, size_t l, size_t c)
         : type(t), value(v), line(l), column(c) {}
+    
+    // Template-based type checking
+    template<TokenType T>
+    bool is() const { return type == T; }
+    
+    // Type-safe conversion to typed token
+    template<TokenType T>
+    std::optional<TypedToken<T>> as() const {
+        if (type == T) {
+            return TypedToken<T>{value, line, column};
+        }
+        return std::nullopt;
+    }
 };
+
+// Compile-time operator precedence using templates
+template<TokenType T>
+struct Precedence {
+    static constexpr int value = []() constexpr {
+        if constexpr (T == TokenType::OR) return 1;
+        else if constexpr (T == TokenType::AND) return 2;
+        else if constexpr (T == TokenType::NOT) return 3;
+        else if constexpr (T == TokenType::EQUAL_EQUAL || T == TokenType::NOT_EQUAL ||
+                           T == TokenType::LESS || T == TokenType::GREATER ||
+                           T == TokenType::LESS_EQUAL || T == TokenType::GREATER_EQUAL) return 4;
+        else if constexpr (T == TokenType::BIT_OR) return 5;
+        else if constexpr (T == TokenType::BIT_XOR) return 6;
+        else if constexpr (T == TokenType::BIT_AND) return 7;
+        else if constexpr (T == TokenType::LEFT_SHIFT || T == TokenType::RIGHT_SHIFT) return 8;
+        else if constexpr (T == TokenType::PLUS || T == TokenType::MINUS) return 9;
+        else if constexpr (T == TokenType::STAR || T == TokenType::SLASH ||
+                           T == TokenType::PERCENT || T == TokenType::FLOOR_DIV) return 10;
+        else if constexpr (T == TokenType::POWER) return 11;
+        else return 0;
+    }();
+};
+
+template<TokenType T>
+inline constexpr int precedence_v = Precedence<T>::value;
 
 /**
  * Tokenizer - converts Python source code to tokens

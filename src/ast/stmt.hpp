@@ -17,14 +17,14 @@ namespace ast {
  */
 
 // Function definition
-class FunctionDef : public ASTNode {
+class FunctionDef : public ASTNodeBase {
 public:
     FunctionDef(const std::string& name,
                 std::vector<std::string> args,
                 std::vector<std::shared_ptr<Stmt>> body,
                 std::vector<std::shared_ptr<Expr>> decorator_list,
                 int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), name_(name), args_(args), body_(body),
+        : ASTNodeBase(lineno, col_offset), name_(name), args_(args), body_(body),
           decorator_list_(decorator_list) {}
 
     std::string name() const { return name_; }
@@ -41,10 +41,10 @@ private:
 };
 
 // Return statement
-class Return : public ASTNode {
+class Return : public ASTNodeBase {
 public:
     Return(std::shared_ptr<Expr> value, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), value_(value) {}
+        : ASTNodeBase(lineno, col_offset), value_(value) {}
 
     std::shared_ptr<Expr> value() const { return value_; }
     std::string to_string(int indent = 0) const override;
@@ -54,12 +54,12 @@ private:
 };
 
 // Assignment
-class Assign : public ASTNode {
+class Assign : public ASTNodeBase {
 public:
     Assign(std::vector<std::shared_ptr<Expr>> targets,
            std::shared_ptr<Expr> value,
            int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), targets_(targets), value_(value) {}
+        : ASTNodeBase(lineno, col_offset), targets_(targets), value_(value) {}
 
     const std::vector<std::shared_ptr<Expr>>& targets() const { return targets_; }
     std::shared_ptr<Expr> value() const { return value_; }
@@ -71,10 +71,10 @@ private:
 };
 
 // Expression statement
-class ExprStmt : public ASTNode {
+class ExprStmt : public ASTNodeBase {
 public:
     ExprStmt(std::shared_ptr<Expr> value, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), value_(value) {}
+        : ASTNodeBase(lineno, col_offset), value_(value) {}
 
     std::shared_ptr<Expr> value() const { return value_; }
     std::string to_string(int indent = 0) const override;
@@ -84,13 +84,13 @@ private:
 };
 
 // If statement
-class If : public ASTNode {
+class If : public ASTNodeBase {
 public:
     If(std::shared_ptr<Expr> test,
        std::vector<std::shared_ptr<Stmt>> body,
        std::vector<std::shared_ptr<Stmt>> orelse,
        int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), test_(test), body_(body), orelse_(orelse) {}
+        : ASTNodeBase(lineno, col_offset), test_(test), body_(body), orelse_(orelse) {}
 
     std::shared_ptr<Expr> test() const { return test_; }
     const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
@@ -104,13 +104,13 @@ private:
 };
 
 // While loop
-class While : public ASTNode {
+class While : public ASTNodeBase {
 public:
     While(std::shared_ptr<Expr> test,
           std::vector<std::shared_ptr<Stmt>> body,
           std::vector<std::shared_ptr<Stmt>> orelse,
           int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), test_(test), body_(body), orelse_(orelse) {}
+        : ASTNodeBase(lineno, col_offset), test_(test), body_(body), orelse_(orelse) {}
 
     std::shared_ptr<Expr> test() const { return test_; }
     const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
@@ -124,32 +124,32 @@ private:
 };
 
 // Break statement
-class Break : public ASTNode {
+class Break : public ASTNodeBase {
 public:
     Break(int lineno, int col_offset)
-        : ASTNode(lineno, col_offset) {}
+        : ASTNodeBase(lineno, col_offset) {}
 
     std::string to_string(int indent = 0) const override;
 };
 
 // Continue statement
-class Continue : public ASTNode {
+class Continue : public ASTNodeBase {
 public:
     Continue(int lineno, int col_offset)
-        : ASTNode(lineno, col_offset) {}
+        : ASTNodeBase(lineno, col_offset) {}
 
     std::string to_string(int indent = 0) const override;
 };
 
 // For loop
-class For : public ASTNode {
+class For : public ASTNodeBase {
 public:
     For(std::shared_ptr<Expr> target,
         std::shared_ptr<Expr> iter,
         std::vector<std::shared_ptr<Stmt>> body,
         std::vector<std::shared_ptr<Stmt>> orelse,
         int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), target_(target), iter_(iter), body_(body), orelse_(orelse) {}
+        : ASTNodeBase(lineno, col_offset), target_(target), iter_(iter), body_(body), orelse_(orelse) {}
 
     std::shared_ptr<Expr> target() const { return target_; }
     std::shared_ptr<Expr> iter() const { return iter_; }
@@ -300,21 +300,21 @@ inline std::string Continue::to_string(int indent) const {
 }
 
 // Pass statement (no-op)
-class Pass : public ASTNode {
+class Pass : public ASTNodeBase {
 public:
     Pass(int lineno, int col_offset)
-        : ASTNode(lineno, col_offset) {}
+        : ASTNodeBase(lineno, col_offset) {}
 
     std::string to_string(int indent = 0) const override;
 };
 
 // Raise statement
-class Raise : public ASTNode {
+class Raise : public ASTNodeBase {
 public:
     Raise(std::shared_ptr<Expr> exc,
           std::shared_ptr<Expr> cause,
           int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), exc_(exc), cause_(cause) {}
+        : ASTNodeBase(lineno, col_offset), exc_(exc), cause_(cause) {}
 
     std::shared_ptr<Expr> exc() const { return exc_; }
     std::shared_ptr<Expr> cause() const { return cause_; }
@@ -326,10 +326,10 @@ private:
 };
 
 // Delete statement
-class Delete : public ASTNode {
+class Delete : public ASTNodeBase {
 public:
     Delete(std::vector<std::shared_ptr<Expr>> targets, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), targets_(targets) {}
+        : ASTNodeBase(lineno, col_offset), targets_(targets) {}
 
     const std::vector<std::shared_ptr<Expr>>& targets() const { return targets_; }
     std::string to_string(int indent = 0) const override;
@@ -339,12 +339,12 @@ private:
 };
 
 // Assert statement
-class Assert : public ASTNode {
+class Assert : public ASTNodeBase {
 public:
     Assert(std::shared_ptr<Expr> test,
            std::shared_ptr<Expr> msg,
            int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), test_(test), msg_(msg) {}
+        : ASTNodeBase(lineno, col_offset), test_(test), msg_(msg) {}
 
     std::shared_ptr<Expr> test() const { return test_; }
     std::shared_ptr<Expr> msg() const { return msg_; }
@@ -356,10 +356,10 @@ private:
 };
 
 // Global statement
-class Global : public ASTNode {
+class Global : public ASTNodeBase {
 public:
     Global(std::vector<std::string> names, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), names_(names) {}
+        : ASTNodeBase(lineno, col_offset), names_(names) {}
 
     const std::vector<std::string>& names() const { return names_; }
     std::string to_string(int indent = 0) const override;
@@ -369,10 +369,10 @@ private:
 };
 
 // Nonlocal statement
-class Nonlocal : public ASTNode {
+class Nonlocal : public ASTNodeBase {
 public:
     Nonlocal(std::vector<std::string> names, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), names_(names) {}
+        : ASTNodeBase(lineno, col_offset), names_(names) {}
 
     const std::vector<std::string>& names() const { return names_; }
     std::string to_string(int indent = 0) const override;
@@ -382,13 +382,13 @@ private:
 };
 
 // Exception handler (for try/except)
-class ExceptHandler : public ASTNode {
+class ExceptHandler : public ASTNodeBase {
 public:
     ExceptHandler(std::shared_ptr<Expr> type,
                   const std::string& name,
                   std::vector<std::shared_ptr<Stmt>> body,
                   int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), type_(type), name_(name), body_(body) {}
+        : ASTNodeBase(lineno, col_offset), type_(type), name_(name), body_(body) {}
 
     std::shared_ptr<Expr> type() const { return type_; }
     std::string name() const { return name_; }
@@ -402,14 +402,14 @@ private:
 };
 
 // Try statement
-class Try : public ASTNode {
+class Try : public ASTNodeBase {
 public:
     Try(std::vector<std::shared_ptr<Stmt>> body,
         std::vector<std::shared_ptr<ExceptHandler>> handlers,
         std::vector<std::shared_ptr<Stmt>> orelse,
         std::vector<std::shared_ptr<Stmt>> finalbody,
         int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), body_(body), handlers_(handlers),
+        : ASTNodeBase(lineno, col_offset), body_(body), handlers_(handlers),
           orelse_(orelse), finalbody_(finalbody) {}
 
     const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
@@ -426,14 +426,14 @@ private:
 };
 
 // Class definition
-class ClassDef : public ASTNode {
+class ClassDef : public ASTNodeBase {
 public:
     ClassDef(const std::string& name,
              std::vector<std::shared_ptr<Expr>> bases,
              std::vector<std::shared_ptr<Stmt>> body,
              std::vector<std::shared_ptr<Expr>> decorator_list,
              int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), name_(name), bases_(bases), body_(body),
+        : ASTNodeBase(lineno, col_offset), name_(name), bases_(bases), body_(body),
           decorator_list_(decorator_list) {}
 
     std::string name() const { return name_; }
@@ -450,10 +450,10 @@ private:
 };
 
 // Import alias (name [as asname])
-class Alias : public ASTNode {
+class Alias : public ASTNodeBase {
 public:
     Alias(const std::string& name, const std::string& asname, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), name_(name), asname_(asname) {}
+        : ASTNodeBase(lineno, col_offset), name_(name), asname_(asname) {}
 
     std::string name() const { return name_; }
     std::string asname() const { return asname_; }  // Empty if no 'as'
@@ -465,10 +465,10 @@ private:
 };
 
 // Import statement
-class Import : public ASTNode {
+class Import : public ASTNodeBase {
 public:
     Import(std::vector<std::shared_ptr<Alias>> names, int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), names_(names) {}
+        : ASTNodeBase(lineno, col_offset), names_(names) {}
 
     const std::vector<std::shared_ptr<Alias>>& names() const { return names_; }
     std::string to_string(int indent = 0) const override;
@@ -478,13 +478,13 @@ private:
 };
 
 // Import from statement
-class ImportFrom : public ASTNode {
+class ImportFrom : public ASTNodeBase {
 public:
     ImportFrom(const std::string& module,
                std::vector<std::shared_ptr<Alias>> names,
                int level,  // 0 = absolute import, >0 = relative import
                int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), module_(module), names_(names), level_(level) {}
+        : ASTNodeBase(lineno, col_offset), module_(module), names_(names), level_(level) {}
 
     std::string module() const { return module_; }  // Empty if relative import
     const std::vector<std::shared_ptr<Alias>>& names() const { return names_; }
@@ -507,12 +507,12 @@ struct WithItem {
 };
 
 // With statement (context managers)
-class With : public ASTNode {
+class With : public ASTNodeBase {
 public:
     With(std::vector<WithItem> items,
          std::vector<std::shared_ptr<Stmt>> body,
          int lineno, int col_offset)
-        : ASTNode(lineno, col_offset), items_(items), body_(body) {}
+        : ASTNodeBase(lineno, col_offset), items_(items), body_(body) {}
 
     const std::vector<WithItem>& items() const { return items_; }
     const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }

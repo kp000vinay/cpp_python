@@ -16,10 +16,10 @@ namespace ast {
  * Module AST node (top-level)
  * Reference: Parser/Python.asdl (mod definitions)
  */
-class Module : public ASTNode {
+class Module : public ASTNodeBase {
 public:
     Module(std::vector<std::shared_ptr<Stmt>> body)
-        : ASTNode(1, 0), body_(body) {}
+        : ASTNodeBase(1, 0), body_(body) {}
 
     const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
     void add_stmt(std::shared_ptr<Stmt> stmt) { body_.push_back(stmt); }
