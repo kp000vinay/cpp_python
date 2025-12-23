@@ -136,6 +136,11 @@ private:
     // Matches CPython's slice_rule: returns nullptr if not a slice (allows fallback to named_expression)
     std::shared_ptr<ast::Expr> parse_slice();
 
+    // F-string parsing
+    std::shared_ptr<ast::Expr> parse_fstring();
+    std::shared_ptr<ast::Expr> parse_formatted_value();
+    std::shared_ptr<ast::Expr> parse_fstring_format_spec();
+
     // Error handling
     void error(const std::string& message);
 };
@@ -944,6 +949,9 @@ inline std::shared_ptr<ast::Expr> Parser::parse_atom() {
         return std::make_shared<ast::Constant>(token.value, token.line, token.column);
     } else if (match(TokenType::STRING)) {
         return std::make_shared<ast::Constant>(token.value, token.line, token.column);
+    } else if (match(TokenType::FSTRING_START)) {
+        // F-string
+        return parse_fstring();
     } else if (match(TokenType::TRUE)) {
         return std::make_shared<ast::Constant>("True", token.line, token.column);
     } else if (match(TokenType::FALSE)) {
@@ -1015,6 +1023,146 @@ inline std::shared_ptr<ast::Expr> Parser::parse_atom() {
 
     error("Unexpected token in expression");
     return nullptr;
+}
+
+// Parse f-string: FSTRING_START (FSTRING_MIDDLE | formatted_value)* FSTRING_END
+inline std::shared_ptr<ast::Expr> Parser::parse_fstring() {
+    Token start_token = current();
+    if (start_token.type != TokenType::FSTRING_START) {
+        error("Expected FSTRING_START");
+        return nullptr;
+    }
+    advance();  // consume FSTRING_START
+
+    std::vector<std::shared_ptr<ast::Expr>> values;
+
+    // Add initial string part if present
+    if (!start_token.value.empty()) {
+        values.push_back(std::make_shared<ast::Constant>(
+            start_token.value, start_token.line, start_token.column));
+    }
+
+    // Parse alternating FSTRING_MIDDLE and formatted_value until FSTRING_END
+    while (current().type != TokenType::FSTRING_END) {
+        if (current().type == TokenType::FSTRING_MIDDLE) {
+            // Literal string part
+            Token middle = current();
+            advance();
+            if (!middle.value.empty()) {
+                values.push_back(std::make_shared<ast::Constant>(
+                    middle.value, middle.line, middle.column));
+            }
+        } else if (current().type == TokenType::LBRACE) {
+            // Expression part: {expr!conversion:format_spec}
+            values.push_back(parse_formatted_value());
+        } else {
+            error("Expected FSTRING_MIDDLE or '{' in f-string");
+            return nullptr;
+        }
+    }
+
+    // Parse FSTRING_END
+    Token end_token = current();
+    advance();  // consume FSTRING_END
+
+    // If we only have one constant value, return it directly (optimization)
+    // Otherwise, return JoinedStr
+    if (values.size() == 1 &&
+        std::dynamic_pointer_cast<ast::Constant>(values[0])) {
+        return values[0];
+    }
+
+    return std::make_shared<ast::JoinedStr>(values, start_token.line, start_token.column);
+}
+
+// Parse formatted value: {expr [!conversion] [:format_spec]}
+inline std::shared_ptr<ast::Expr> Parser::parse_formatted_value() {
+    // Parse '{'
+    Token lbrace = current();
+    if (lbrace.type != TokenType::LBRACE) {
+        error("Expected '{' in formatted value");
+        return nullptr;
+    }
+    advance();
+
+    // Parse expression (can be any expression, including nested f-strings)
+    std::shared_ptr<ast::Expr> value = parse_expr();
+
+    // Parse optional conversion: !s, !r, !a
+    int conversion = -1;
+    if (match(TokenType::NOT)) {
+        if (current().type == TokenType::IDENTIFIER) {
+            std::string conv_char = current().value;
+            if (conv_char == "s") {
+                conversion = 115;
+            } else if (conv_char == "r") {
+                conversion = 114;
+            } else if (conv_char == "a") {
+                conversion = 97;
+            } else {
+                error("Invalid conversion specifier: !" + conv_char);
+                return nullptr;
+            }
+            advance();
+        } else {
+            error("Expected conversion specifier (s, r, or a) after '!'");
+            return nullptr;
+        }
+    }
+
+    // Parse optional format specifier: :format_spec
+    std::shared_ptr<ast::Expr> format_spec = nullptr;
+    if (match(TokenType::COLON)) {
+        format_spec = parse_fstring_format_spec();
+    }
+
+    // Parse '}'
+    if (!match(TokenType::RBRACE)) {
+        error("Expected '}' in f-string expression");
+        return nullptr;
+    }
+
+    return std::make_shared<ast::FormattedValue>(
+        value, conversion, format_spec, lbrace.line, lbrace.column);
+}
+
+// Parse format specifier: can contain FSTRING_MIDDLE tokens and nested formatted_value
+inline std::shared_ptr<ast::Expr> Parser::parse_fstring_format_spec() {
+    std::vector<std::shared_ptr<ast::Expr>> values;
+
+    // Parse format spec parts until we see } (end of formatted value)
+    // We need to track when we're done - the } will be consumed by parse_formatted_value
+    while (current().type != TokenType::RBRACE) {
+        if (current().type == TokenType::FSTRING_MIDDLE) {
+            // Literal format text (e.g., ".2f", ">10")
+            Token middle = current();
+            advance();
+            if (!middle.value.empty()) {
+                values.push_back(std::make_shared<ast::Constant>(
+                    middle.value, middle.line, middle.column));
+            }
+        } else if (current().type == TokenType::LBRACE) {
+            // Nested f-string replacement field in format spec
+            values.push_back(parse_formatted_value());
+        } else {
+            // End of format spec (should be })
+            break;
+        }
+    }
+
+    // If we only have one constant value, return it directly
+    if (values.size() == 1 &&
+        std::dynamic_pointer_cast<ast::Constant>(values[0])) {
+        return values[0];
+    }
+
+    // If empty, return nullptr (no format spec)
+    if (values.empty()) {
+        return nullptr;
+    }
+
+    // Otherwise return JoinedStr
+    return std::make_shared<ast::JoinedStr>(values, current().line, current().column);
 }
 
 // Parse primary expression (handles left-recursive attribute, subscript, call)

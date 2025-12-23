@@ -693,6 +693,81 @@ inline std::string GeneratorExp::to_string(int indent) const {
     return oss.str();
 }
 
+// FormattedValue - represents {expr!conversion:format_spec} in f-strings
+class FormattedValue : public ASTNodeBase {
+public:
+    FormattedValue(std::shared_ptr<Expr> value, int conversion,
+                   std::shared_ptr<Expr> format_spec,
+                   int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), value_(value),
+          conversion_(conversion), format_spec_(format_spec) {}
+
+    std::shared_ptr<Expr> value() const { return value_; }
+    int conversion() const { return conversion_; }  // -1 for none, 115='s', 114='r', 97='a'
+    std::shared_ptr<Expr> format_spec() const { return format_spec_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::shared_ptr<Expr> value_;
+    int conversion_;  // -1 for none, 115='s', 114='r', 97='a'
+    std::shared_ptr<Expr> format_spec_;  // Can be nullptr or a JoinedStr for nested f-strings
+};
+
+// JoinedStr - represents an f-string with alternating string parts and FormattedValue nodes
+class JoinedStr : public ASTNodeBase {
+public:
+    JoinedStr(std::vector<std::shared_ptr<Expr>> values, int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), values_(values) {}
+
+    const std::vector<std::shared_ptr<Expr>>& values() const { return values_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::vector<std::shared_ptr<Expr>> values_;  // Alternating Constant (strings) and FormattedValue
+};
+
+inline std::string FormattedValue::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "FormattedValue(\n";
+    oss << indent_str(indent + 1) << "value=\n";
+    oss << value_->to_string(indent + 2) << ",\n";
+    oss << indent_str(indent + 1) << "conversion=";
+    if (conversion_ == -1) {
+        oss << "-1 (none)";
+    } else if (conversion_ == 115) {
+        oss << "115 ('s')";
+    } else if (conversion_ == 114) {
+        oss << "114 ('r')";
+    } else if (conversion_ == 97) {
+        oss << "97 ('a')";
+    } else {
+        oss << conversion_;
+    }
+    oss << ",\n";
+    if (format_spec_) {
+        oss << indent_str(indent + 1) << "format_spec=\n";
+        oss << format_spec_->to_string(indent + 2) << "\n";
+    } else {
+        oss << indent_str(indent + 1) << "format_spec=None\n";
+    }
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string JoinedStr::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "JoinedStr(\n";
+    oss << indent_str(indent + 1) << "values=[\n";
+    for (size_t i = 0; i < values_.size(); ++i) {
+        oss << values_[i]->to_string(indent + 2);
+        if (i < values_.size() - 1) oss << ",";
+        oss << "\n";
+    }
+    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
 } // namespace ast
 } // namespace cpython_cpp
 

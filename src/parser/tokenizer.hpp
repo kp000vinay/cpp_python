@@ -17,7 +17,7 @@ namespace parser {
 /**
  * Template-based tokenizer with compile-time optimizations
  * Reference: Grammar/Tokens, Parser/tokenizer/
- * 
+ *
  * Uses C++ templates for:
  * - Compile-time token type checking
  * - Zero-cost abstractions
@@ -44,7 +44,10 @@ enum class TokenType {
     NEWLINE, INDENT, DEDENT, END_OF_FILE, ENDMARKER, ELLIPSIS,
 
     // Decorator
-    AT
+    AT,
+
+    // F-string tokens
+    FSTRING_START, FSTRING_MIDDLE, FSTRING_END
 };
 
 // Compile-time token tag for type-safe operations
@@ -60,7 +63,7 @@ struct TypedToken {
     std::string value;
     size_t line;
     size_t column;
-    
+
     TypedToken(std::string v, size_t l, size_t c)
         : value(std::move(v)), line(l), column(c) {}
 };
@@ -74,11 +77,11 @@ struct Token {
 
     Token(TokenType t, const std::string& v, size_t l, size_t c)
         : type(t), value(v), line(l), column(c) {}
-    
+
     // Template-based type checking
     template<TokenType T>
     bool is() const { return type == T; }
-    
+
     // Type-safe conversion to typed token
     template<TokenType T>
     std::optional<TypedToken<T>> as() const {
@@ -139,12 +142,27 @@ private:
     size_t line_;
     size_t column_;
 
+    // F-string state tracking
+    struct FStringState {
+        char quote;           // ' or "
+        int quote_size;       // 1 for single quote, 3 for triple quote
+        bool raw;             // true for raw f-strings (rf or fr)
+        int curly_brace_depth; // Track nesting depth for expressions
+    };
+    std::vector<FStringState> fstring_stack_;  // Stack for nested f-strings
+
     void skip_whitespace();
     void skip_comment();
     Token read_number();
     Token read_string();
     Token read_identifier_or_keyword();
     TokenType keyword_to_token(const std::string& word);
+
+    // F-string lexing functions
+    bool check_fstring_prefix(size_t& prefix_len, bool& is_raw);
+    Token read_fstring_start();
+    Token read_fstring_middle();
+    Token read_fstring_end();
 };
 
 // Keyword map
@@ -188,7 +206,7 @@ namespace {
 
 // Implementations
 inline Tokenizer::Tokenizer(const std::string& source)
-    : source_(source), position_(0), line_(1), column_(1) {}
+    : source_(source), position_(0), line_(1), column_(1), fstring_stack_() {}
 
 inline void Tokenizer::skip_whitespace() {
     while (position_ < source_.length()) {
@@ -303,6 +321,280 @@ inline TokenType Tokenizer::keyword_to_token(const std::string& word) {
     return TokenType::IDENTIFIER;
 }
 
+// Check if we have an f-string prefix (f/F/rf/fr) before a quote
+// Returns true if f-string detected, and sets is_raw and has_f
+inline bool Tokenizer::check_fstring_prefix(size_t& prefix_len, bool& is_raw) {
+    size_t saved_pos = position_;
+    size_t saved_col = column_;
+    prefix_len = 0;
+    is_raw = false;
+    bool has_f = false;
+
+    // Check for r/R prefix (raw) - can come before or after f
+    if (position_ < source_.length() &&
+        (source_[position_] == 'r' || source_[position_] == 'R')) {
+        is_raw = true;
+        prefix_len++;
+        position_++;
+        column_++;
+    }
+
+    // Check for f/F prefix
+    if (position_ < source_.length() &&
+        (source_[position_] == 'f' || source_[position_] == 'F')) {
+        has_f = true;
+        prefix_len++;
+        position_++;
+        column_++;
+    }
+
+    // If we saw r but not f, check if f comes after
+    if (is_raw && !has_f && position_ < source_.length() &&
+        (source_[position_] == 'f' || source_[position_] == 'F')) {
+        has_f = true;
+        prefix_len++;
+        position_++;
+        column_++;
+    }
+
+    // Check if we have a quote after the prefix
+    if (has_f && position_ < source_.length() &&
+        (source_[position_] == '"' || source_[position_] == '\'')) {
+        // Don't restore - we'll consume in read_fstring_start
+        return true;
+    }
+
+    // No f-string, restore position
+    position_ = saved_pos;
+    column_ = saved_col;
+    return false;
+}
+
+// Read f-string start token
+inline Token Tokenizer::read_fstring_start() {
+    size_t start_pos = position_;
+    size_t start_col = column_;
+
+    // Check prefix (already detected, but we need to determine raw)
+    bool is_raw = false;
+    bool has_f = false;
+
+    // Check for r/R prefix (raw) - can come before or after f
+    if (position_ < source_.length() &&
+        (source_[position_] == 'r' || source_[position_] == 'R')) {
+        is_raw = true;
+        position_++;
+        column_++;
+    }
+
+    // Check for f/F prefix
+    if (position_ < source_.length() &&
+        (source_[position_] == 'f' || source_[position_] == 'F')) {
+        has_f = true;
+        position_++;
+        column_++;
+    }
+
+    // If we saw r but not f, check if f comes after
+    if (is_raw && !has_f && position_ < source_.length() &&
+        (source_[position_] == 'f' || source_[position_] == 'F')) {
+        has_f = true;
+        position_++;
+        column_++;
+    }
+
+    if (!has_f) {
+        // Should not happen if check_fstring_prefix worked correctly
+        return Token(TokenType::ENDMARKER, "", line_, start_col);
+    }
+
+    // Determine quote and quote size
+    char quote = source_[position_];
+    int quote_size = 1;
+
+    // Check for triple quotes
+    if (position_ + 2 < source_.length() &&
+        source_[position_] == source_[position_ + 1] &&
+        source_[position_] == source_[position_ + 2]) {
+        quote_size = 3;
+        position_ += 3;
+        column_ += 3;
+    } else {
+        position_++;
+        column_++;
+    }
+
+    // Push f-string state
+    FStringState state;
+    state.quote = quote;
+    state.quote_size = quote_size;
+    state.raw = is_raw;
+    state.curly_brace_depth = 0;
+    fstring_stack_.push_back(state);
+
+    // Read initial string content until { or end quote
+    std::string value;
+    bool escaped = false;
+
+    while (position_ < source_.length()) {
+        char c = source_[position_];
+
+        // Check for end quote (must check before other processing)
+        if (!escaped && c == quote) {
+            // Check if it's the closing quote (same size as opening)
+            bool is_closing = true;
+            for (int i = 0; i < quote_size; i++) {
+                if (position_ + i >= source_.length() ||
+                    source_[position_ + i] != quote) {
+                    is_closing = false;
+                    break;
+                }
+            }
+            if (is_closing) {
+                // This is the end - don't consume the quote, return FSTRING_START
+                // The next token will be FSTRING_END
+                break;
+            }
+        }
+
+        // Check for { (start of expression) - only if not at end quote
+        if (!escaped && c == '{') {
+            // Check if it's {{ (literal brace)
+            if (position_ + 1 < source_.length() && source_[position_ + 1] == '{') {
+                value += '{';
+                position_ += 2;
+                column_ += 2;
+                continue;
+            } else {
+                // Start of expression - return FSTRING_START and let parser handle it
+                break;
+            }
+        }
+
+        // Handle escape sequences
+        if (escaped) {
+            if (is_raw && c != quote && c != '\\') {
+                // In raw f-strings, only quote and backslash can be escaped
+                value += '\\';
+            }
+            value += c;
+            escaped = false;
+            position_++;
+            column_++;
+        } else if (c == '\\' && !is_raw) {
+            escaped = true;
+            position_++;
+            column_++;
+        } else {
+            value += c;
+            position_++;
+            if (c == '\n') {
+                line_++;
+                column_ = 1;
+            } else {
+                column_++;
+            }
+        }
+    }
+
+    return Token(TokenType::FSTRING_START, value, line_, start_col);
+}
+
+// Read f-string middle token (literal text between expressions)
+inline Token Tokenizer::read_fstring_middle() {
+    if (fstring_stack_.empty()) {
+        return Token(TokenType::ENDMARKER, "", line_, column_);
+    }
+
+    FStringState& state = fstring_stack_.back();
+    size_t start_col = column_;
+    std::string value;
+    bool escaped = false;
+
+    while (position_ < source_.length()) {
+        char c = source_[position_];
+
+        // Check for end quote
+        if (!escaped && c == state.quote) {
+            bool is_closing = true;
+            for (int i = 0; i < state.quote_size; i++) {
+                if (position_ + i >= source_.length() ||
+                    source_[position_ + i] != state.quote) {
+                    is_closing = false;
+                    break;
+                }
+            }
+            if (is_closing) {
+                // End of f-string
+                break;
+            }
+        }
+
+        // Check for { (start of expression)
+        if (!escaped && c == '{') {
+            if (position_ + 1 < source_.length() && source_[position_ + 1] == '{') {
+                // Literal {{ - emit single {
+                value += '{';
+                position_ += 2;
+                column_ += 2;
+                continue;
+            } else {
+                // Start of expression
+                break;
+            }
+        }
+
+        // Handle escape sequences
+        if (escaped) {
+            if (state.raw && c != state.quote && c != '\\') {
+                value += '\\';
+            }
+            value += c;
+            escaped = false;
+            position_++;
+            column_++;
+        } else if (c == '\\' && !state.raw) {
+            escaped = true;
+            position_++;
+            column_++;
+        } else {
+            value += c;
+            position_++;
+            if (c == '\n') {
+                line_++;
+                column_ = 1;
+            } else {
+                column_++;
+            }
+        }
+    }
+
+    return Token(TokenType::FSTRING_MIDDLE, value, line_, start_col);
+}
+
+// Read f-string end token
+inline Token Tokenizer::read_fstring_end() {
+    if (fstring_stack_.empty()) {
+        return Token(TokenType::ENDMARKER, "", line_, column_);
+    }
+
+    FStringState& state = fstring_stack_.back();
+    size_t start_col = column_;
+
+    // Consume closing quote
+    for (int i = 0; i < state.quote_size; i++) {
+        if (position_ < source_.length() && source_[position_] == state.quote) {
+            position_++;
+            column_++;
+        }
+    }
+
+    // Pop f-string state
+    fstring_stack_.pop_back();
+
+    return Token(TokenType::FSTRING_END, "", line_, start_col);
+}
+
 inline Token Tokenizer::next_token() {
     skip_whitespace();
     skip_comment();
@@ -319,7 +611,95 @@ inline Token Tokenizer::next_token() {
         return read_number();
     }
 
-    // Strings
+    // Check if we're in an f-string
+    if (!fstring_stack_.empty()) {
+        FStringState& state = fstring_stack_.back();
+
+        // Check for closing quote
+        if (c == state.quote) {
+            bool is_closing = true;
+            for (int i = 0; i < state.quote_size; i++) {
+                if (position_ + i >= source_.length() ||
+                    source_[position_ + i] != state.quote) {
+                    is_closing = false;
+                    break;
+                }
+            }
+            if (is_closing) {
+                return read_fstring_end();
+            }
+        }
+
+        // Check for { - start of expression (unless {{)
+        if (c == '{') {
+            if (position_ + 1 < source_.length() && source_[position_ + 1] == '{') {
+                // Literal {{ - handled in read_fstring_middle
+                return read_fstring_middle();
+            } else {
+                // Start of expression - increment depth and emit LBRACE
+                state.curly_brace_depth++;
+                position_++;
+                column_++;
+                return Token(TokenType::LBRACE, "{", line_, start_col);
+            }
+        }
+
+        // Check for } - end of expression (if depth matches)
+        if (c == '}') {
+            if (position_ + 1 < source_.length() && source_[position_ + 1] == '}') {
+                // Literal }} - handled in read_fstring_middle
+                return read_fstring_middle();
+            } else if (state.curly_brace_depth > 0) {
+                // End of expression - decrement depth and emit RBRACE
+                state.curly_brace_depth--;
+                position_++;
+                column_++;
+                return Token(TokenType::RBRACE, "}", line_, start_col);
+            } else {
+                // This shouldn't happen - unmatched }
+                position_++;
+                column_++;
+                return Token(TokenType::RBRACE, "}", line_, start_col);
+            }
+        }
+
+        // Otherwise, read f-string middle (literal text)
+        return read_fstring_middle();
+    }
+
+    // Check for f-string prefix before quote
+    // Peek ahead to see if we have f/F/rf/fr before a quote
+    if ((c == 'f' || c == 'F' || c == 'r' || c == 'R') && position_ + 1 < source_.length()) {
+        size_t peek_pos = position_;
+        bool is_raw = false;
+        bool has_f = false;
+
+        // Check for r/R
+        if (source_[peek_pos] == 'r' || source_[peek_pos] == 'R') {
+            is_raw = true;
+            peek_pos++;
+        }
+
+        // Check for f/F
+        if (peek_pos < source_.length() &&
+            (source_[peek_pos] == 'f' || source_[peek_pos] == 'F')) {
+            has_f = true;
+            peek_pos++;
+        } else if (is_raw && peek_pos < source_.length() &&
+                   (source_[peek_pos] == 'f' || source_[peek_pos] == 'F')) {
+            has_f = true;
+            peek_pos++;
+        }
+
+        // Check if we have a quote after the prefix
+        if (has_f && peek_pos < source_.length() &&
+            (source_[peek_pos] == '"' || source_[peek_pos] == '\'')) {
+            // We have an f-string - read the start
+            return read_fstring_start();
+        }
+    }
+
+    // Strings (non-f-string)
     if (c == '"' || c == '\'') {
         return read_string();
     }
