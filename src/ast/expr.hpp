@@ -549,6 +549,22 @@ private:
     std::shared_ptr<Expr> value_;
 };
 
+// Named expression (walrus operator): name := value (Python 3.8+)
+class NamedExpr : public ASTNodeBase {
+public:
+    NamedExpr(std::shared_ptr<Expr> target, std::shared_ptr<Expr> value,
+              int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), target_(target), value_(value) {}
+
+    std::shared_ptr<Expr> target() const { return target_; }
+    std::shared_ptr<Expr> value() const { return value_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::shared_ptr<Expr> target_;
+    std::shared_ptr<Expr> value_;
+};
+
 // Conditional expression (ternary operator): x if condition else y
 class IfExp : public ASTNodeBase {
 public:
@@ -686,6 +702,17 @@ inline std::string YieldFrom::to_string(int indent) const {
 inline std::string Await::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "Await(\n";
+    oss << indent_str(indent + 1) << "value=\n";
+    oss << value_->to_string(indent + 2) << "\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string NamedExpr::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "NamedExpr(\n";
+    oss << indent_str(indent + 1) << "target=\n";
+    oss << target_->to_string(indent + 2) << ",\n";
     oss << indent_str(indent + 1) << "value=\n";
     oss << value_->to_string(indent + 2) << "\n";
     oss << indent_str(indent) << ")";

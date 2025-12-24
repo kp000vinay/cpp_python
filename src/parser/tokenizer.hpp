@@ -34,7 +34,7 @@ enum class TokenType {
     // Operators
     PLUS, MINUS, STAR, SLASH, PERCENT, POWER, FLOOR_DIV, EQUAL,
     LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE,
-    COLON, COMMA, SEMICOLON, DOT,
+    COLON, COMMA, SEMICOLON, DOT, WALRUS,  // := operator (Python 3.8+)
     GREATER, LESS, GREATER_EQUAL, LESS_EQUAL, EQUAL_EQUAL, NOT_EQUAL,
     BIT_OR, BIT_AND, BIT_XOR, BIT_NOT, LEFT_SHIFT, RIGHT_SHIFT,
 
@@ -927,6 +927,11 @@ inline Token Tokenizer::next_token() {
             return Token(TokenType::RBRACE, "}", line_, start_col);
         case ':':
             position_++; column_++;
+            // Check for walrus operator :=
+            if (position_ < source_.size() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::WALRUS, ":=", line_, start_col);
+            }
             return Token(TokenType::COLON, ":", line_, start_col);
         case ',':
             position_++; column_++;

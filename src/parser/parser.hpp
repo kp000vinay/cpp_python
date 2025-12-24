@@ -823,6 +823,35 @@ inline std::shared_ptr<ast::Expr> Parser::parse_expr() {
               << ", value='" << current().value << "'" << std::endl;
     std::cerr.flush();
     auto result = parse_disjunction();
+    
+    // Check for walrus operator (named expression) :=
+    // Walrus has lower precedence than 'or' but higher than comma
+    if (current().type == TokenType::WALRUS) {
+        Token walrus_token = current();
+        advance();  // consume :=
+        
+        // Validate that target is a simple Name
+        auto name_expr = std::dynamic_pointer_cast<ast::Name>(result);
+        if (!name_expr) {
+            error("Assignment expression target must be a simple name");
+        }
+        
+        // Create target with Store context
+        auto target = std::make_shared<ast::Name>(
+            name_expr->id(),
+            ast::ExprContext::Store,
+            name_expr->lineno(),
+            name_expr->col_offset()
+        );
+        
+        // Parse value (recursive for right-associativity)
+        auto value = parse_expr();
+        
+        result = std::make_shared<ast::NamedExpr>(
+            target, value, walrus_token.line, walrus_token.column
+        );
+    }
+    
     std::cerr << "[DEBUG parse_expr] Exit, token=" << current_token_
               << ", type=" << static_cast<int>(current().type) << std::endl;
     std::cerr.flush();
