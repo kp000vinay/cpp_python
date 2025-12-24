@@ -16,52 +16,67 @@ namespace ast {
  * Reference: Parser/Python.asdl (stmt definitions)
  */
 
+// Function argument with optional annotation (Python 3.5+)
+struct arg {
+    std::string arg_name;                      // Parameter name
+    std::shared_ptr<Expr> annotation;          // Type annotation (optional, can be nullptr)
+    
+    arg(const std::string& name, std::shared_ptr<Expr> ann = nullptr)
+        : arg_name(name), annotation(ann) {}
+};
+
 // Function definition
 class FunctionDef : public ASTNodeBase {
 public:
     FunctionDef(const std::string& name,
-                std::vector<std::string> args,
+                std::vector<arg> args,
                 std::vector<std::shared_ptr<Stmt>> body,
                 std::vector<std::shared_ptr<Expr>> decorator_list,
+                std::shared_ptr<Expr> returns,  // Return type annotation (optional)
                 int lineno, int col_offset)
         : ASTNodeBase(lineno, col_offset), name_(name), args_(args), body_(body),
-          decorator_list_(decorator_list) {}
+          decorator_list_(decorator_list), returns_(returns) {}
 
     std::string name() const { return name_; }
-    const std::vector<std::string>& args() const { return args_; }
+    const std::vector<arg>& args() const { return args_; }
     const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
     const std::vector<std::shared_ptr<Expr>>& decorator_list() const { return decorator_list_; }
+    std::shared_ptr<Expr> returns() const { return returns_; }
     std::string to_string(int indent = 0) const override;
 
 private:
     std::string name_;
-    std::vector<std::string> args_;
+    std::vector<arg> args_;
     std::vector<std::shared_ptr<Stmt>> body_;
     std::vector<std::shared_ptr<Expr>> decorator_list_;
+    std::shared_ptr<Expr> returns_;  // Return type annotation
 };
 
 // Async function definition (Python 3.5+)
 class AsyncFunctionDef : public ASTNodeBase {
 public:
     AsyncFunctionDef(const std::string& name,
-                     std::vector<std::string> args,
+                     std::vector<arg> args,
                      std::vector<std::shared_ptr<Stmt>> body,
                      std::vector<std::shared_ptr<Expr>> decorator_list,
+                     std::shared_ptr<Expr> returns,  // Return type annotation (optional)
                      int lineno, int col_offset)
         : ASTNodeBase(lineno, col_offset), name_(name), args_(args), body_(body),
-          decorator_list_(decorator_list) {}
+          decorator_list_(decorator_list), returns_(returns) {}
 
     std::string name() const { return name_; }
-    const std::vector<std::string>& args() const { return args_; }
+    const std::vector<arg>& args() const { return args_; }
     const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
     const std::vector<std::shared_ptr<Expr>>& decorator_list() const { return decorator_list_; }
+    std::shared_ptr<Expr> returns() const { return returns_; }
     std::string to_string(int indent = 0) const override;
 
 private:
     std::string name_;
-    std::vector<std::string> args_;
+    std::vector<arg> args_;
     std::vector<std::shared_ptr<Stmt>> body_;
     std::vector<std::shared_ptr<Expr>> decorator_list_;
+    std::shared_ptr<Expr> returns_;  // Return type annotation
 };
 
 // Return statement
@@ -92,6 +107,33 @@ public:
 private:
     std::vector<std::shared_ptr<Expr>> targets_;
     std::shared_ptr<Expr> value_;
+};
+
+// Annotated assignment: x: int = 5 or y: str (Python 3.6+)
+class AnnAssign : public ASTNodeBase {
+public:
+    AnnAssign(std::shared_ptr<Expr> target,
+              std::shared_ptr<Expr> annotation,
+              std::shared_ptr<Expr> value,  // optional, can be nullptr
+              bool simple,
+              int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset),
+          target_(target),
+          annotation_(annotation),
+          value_(value),
+          simple_(simple) {}
+
+    std::shared_ptr<Expr> target() const { return target_; }
+    std::shared_ptr<Expr> annotation() const { return annotation_; }
+    std::shared_ptr<Expr> value() const { return value_; }
+    bool simple() const { return simple_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::shared_ptr<Expr> target_;
+    std::shared_ptr<Expr> annotation_;
+    std::shared_ptr<Expr> value_;  // nullptr if no value (e.g., "y: str")
+    bool simple_;  // True if target is a simple name
 };
 
 // Augmented assignment (+=, -=, etc.)
@@ -245,17 +287,25 @@ inline std::string FunctionDef::to_string(int indent) const {
         }
         oss << indent_str(indent + 1) << "],\n";
     }
-    oss << indent_str(indent + 1) << "args=[";
+    oss << indent_str(indent + 1) << "args=[\n";
     for (size_t i = 0; i < args_.size(); ++i) {
-        oss << "'" << args_[i] << "'";
-        if (i < args_.size() - 1) oss << ", ";
+        oss << indent_str(indent + 2) << "arg(name='" << args_[i].arg_name << "'";
+        if (args_[i].annotation) {
+            oss << ", annotation=" << args_[i].annotation->to_string(0);
+        }
+        oss << ")";
+        if (i < args_.size() - 1) oss << ",";
+        oss << "\n";
     }
-    oss << "],\n";
+    oss << indent_str(indent + 1) << "],\n";
     oss << indent_str(indent + 1) << "body=[\n";
     for (const auto& stmt : body_) {
         oss << stmt->to_string(indent + 2) << ",\n";
     }
-    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent + 1) << "],\n";
+    if (returns_) {
+        oss << indent_str(indent + 1) << "returns=" << returns_->to_string(0) << "\n";
+    }
     oss << indent_str(indent) << ")";
     return oss.str();
 }
@@ -271,17 +321,25 @@ inline std::string AsyncFunctionDef::to_string(int indent) const {
         }
         oss << indent_str(indent + 1) << "],\n";
     }
-    oss << indent_str(indent + 1) << "args=[";
+    oss << indent_str(indent + 1) << "args=[\n";
     for (size_t i = 0; i < args_.size(); ++i) {
-        oss << "'" << args_[i] << "'";
-        if (i < args_.size() - 1) oss << ", ";
+        oss << indent_str(indent + 2) << "arg(name='" << args_[i].arg_name << "'";
+        if (args_[i].annotation) {
+            oss << ", annotation=" << args_[i].annotation->to_string(0);
+        }
+        oss << ")";
+        if (i < args_.size() - 1) oss << ",";
+        oss << "\n";
     }
-    oss << "],\n";
+    oss << indent_str(indent + 1) << "],\n";
     oss << indent_str(indent + 1) << "body=[\n";
     for (const auto& stmt : body_) {
         oss << stmt->to_string(indent + 2) << ",\n";
     }
-    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent + 1) << "],\n";
+    if (returns_) {
+        oss << indent_str(indent + 1) << "returns=" << returns_->to_string(0) << "\n";
+    }
     oss << indent_str(indent) << ")";
     return oss.str();
 }
@@ -307,6 +365,24 @@ inline std::string Assign::to_string(int indent) const {
     }
     oss << indent_str(indent + 1) << "],\n";
     oss << value_->to_string(indent + 1) << "\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string AnnAssign::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "AnnAssign(\n";
+    oss << indent_str(indent + 1) << "target=\n";
+    oss << target_->to_string(indent + 2) << ",\n";
+    oss << indent_str(indent + 1) << "annotation=\n";
+    oss << annotation_->to_string(indent + 2) << ",\n";
+    if (value_) {
+        oss << indent_str(indent + 1) << "value=\n";
+        oss << value_->to_string(indent + 2) << ",\n";
+    } else {
+        oss << indent_str(indent + 1) << "value=None,\n";
+    }
+    oss << indent_str(indent + 1) << "simple=" << (simple_ ? "True" : "False") << "\n";
     oss << indent_str(indent) << ")";
     return oss.str();
 }

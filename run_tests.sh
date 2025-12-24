@@ -65,6 +65,7 @@ declare -a CATEGORIES=(
     "tests/async_comprehensions"
     "tests/set_literals"
     "tests/walrus_operator"
+    "tests/type_annotations"
 )
 
 for category in "${CATEGORIES[@]}"; do

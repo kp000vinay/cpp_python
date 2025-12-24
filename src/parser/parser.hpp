@@ -98,7 +98,7 @@ private:
     std::shared_ptr<ast::Expr> parse_star_expression();
 
     // Helper for parsing argument lists
-    std::vector<std::string> parse_arg_list();
+    std::vector<ast::arg> parse_arg_list();
     std::vector<std::shared_ptr<ast::Expr>> parse_expr_list();
 
     // CPython-style arguments parsing (matches arguments_rule and args_rule)
@@ -381,7 +381,40 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_stmt() {
                   << ", type=" << static_cast<int>(current().type) << std::endl;
         std::cerr.flush();
         auto expr = parse_expr();
-        if (is_augmented_assign()) {
+        
+        // Check for annotated assignment: x: int = 5 or y: str
+        if (current().type == TokenType::COLON) {
+            // This is an annotated assignment
+            advance(); // consume ':'
+            
+            // Parse the annotation
+            auto annotation = parse_expr();
+            
+            // Check if target is a simple name
+            auto name_expr = std::dynamic_pointer_cast<ast::Name>(expr);
+            bool simple = (name_expr != nullptr);
+            
+            // Change target context to Store
+            if (simple) {
+                expr = std::make_shared<ast::Name>(
+                    name_expr->id(),
+                    ast::ExprContext::Store,
+                    name_expr->lineno(),
+                    name_expr->col_offset()
+                );
+            }
+            
+            // Check for optional value: x: int = 5
+            std::shared_ptr<ast::Expr> value = nullptr;
+            if (match(TokenType::EQUAL)) {
+                value = parse_expr();
+            }
+            
+            return std::make_shared<ast::AnnAssign>(
+                expr, annotation, value, simple,
+                expr->lineno(), expr->col_offset()
+            );
+        } else if (is_augmented_assign()) {
             // This is an augmented assignment (+=, -=, etc.)
             TokenType op_token = current().type;
             ast::Operator op = token_to_operator(op_token);
@@ -422,6 +455,7 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_function_def() {
     if (auto func = std::dynamic_pointer_cast<ast::FunctionDef>(func_def)) {
         return std::make_shared<ast::FunctionDef>(
             func->name(), func->args(), func->body(), decorators,
+            func->returns(),  // preserve returns annotation
             func->lineno(), func->col_offset());
     }
     return func_def;
@@ -443,10 +477,17 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_function_def_raw() {
         error("Expected '(' after function name");
     }
 
-    std::vector<std::string> args = parse_arg_list();
+    std::vector<ast::arg> args = parse_arg_list();
 
     if (!match(TokenType::RPAREN)) {
         error("Expected ')' after arguments");
+    }
+
+    // Check for return annotation: -> type
+    std::shared_ptr<ast::Expr> returns = nullptr;
+    if (current().type == TokenType::ARROW) {
+        advance();  // consume '->'
+        returns = parse_expr();
     }
 
     if (!match(TokenType::COLON)) {
@@ -472,6 +513,7 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_function_def_raw() {
     }
 
     return std::make_shared<ast::FunctionDef>(name, args, body, std::vector<std::shared_ptr<ast::Expr>>(),
+                                             returns,  // return annotation
                                              name_token.line, name_token.column);
 }
 
@@ -712,10 +754,17 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_async_function_def() {
         error("Expected '(' after function name");
     }
 
-    std::vector<std::string> args = parse_arg_list();
+    std::vector<ast::arg> args = parse_arg_list();
 
     if (!match(TokenType::RPAREN)) {
         error("Expected ')' after arguments");
+    }
+
+    // Check for return annotation: -> type
+    std::shared_ptr<ast::Expr> returns = nullptr;
+    if (current().type == TokenType::ARROW) {
+        advance();  // consume '->'
+        returns = parse_expr();
     }
 
     if (!match(TokenType::COLON)) {
@@ -739,6 +788,7 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_async_function_def() {
     }
 
     return std::make_shared<ast::AsyncFunctionDef>(name, args, body, std::vector<std::shared_ptr<ast::Expr>>(),
+                                                    returns,  // return annotation
                                                     async_token.line, async_token.column);
 }
 
@@ -1663,8 +1713,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_call() {
     return std::make_shared<ast::Call>(func, args, func_token.line, func_token.column);
 }
 
-inline std::vector<std::string> Parser::parse_arg_list() {
-    std::vector<std::string> args;
+inline std::vector<ast::arg> Parser::parse_arg_list() {
+    std::vector<ast::arg> args;
 
     if (current().type == TokenType::RPAREN) {
         return args; // Empty argument list
@@ -1674,8 +1724,17 @@ inline std::vector<std::string> Parser::parse_arg_list() {
         if (current().type != TokenType::IDENTIFIER) {
             error("Expected argument name");
         }
-        args.push_back(current().value);
+        std::string arg_name = current().value;
         advance();
+        
+        // Check for type annotation: arg: type
+        std::shared_ptr<ast::Expr> annotation = nullptr;
+        if (current().type == TokenType::COLON) {
+            advance();  // consume ':'
+            annotation = parse_expr();
+        }
+        
+        args.push_back(ast::arg(arg_name, annotation));
 
         if (match(TokenType::COMMA)) {
             continue;
@@ -2546,11 +2605,15 @@ inline ast::WithItem Parser::parse_with_item() {
 inline std::shared_ptr<ast::Expr> Parser::parse_lambda() {
     Token lambda_token = tokens_[current_token_ - 1]; // Get the lambda token we just matched
 
-    // Parse optional parameters
+    // Parse optional parameters (lambda doesn't support annotations yet)
     std::vector<std::string> args;
     if (current().type != TokenType::COLON) {
-        // Parse argument list
-        args = parse_arg_list();
+        // Parse simple argument names (no annotations for lambda)
+        while (current().type == TokenType::IDENTIFIER) {
+            args.push_back(current().value);
+            advance();
+            if (!match(TokenType::COMMA)) break;
+        }
     }
 
     // Expect colon
