@@ -1554,43 +1554,65 @@ inline std::shared_ptr<ast::Expr> Parser::parse_dict() {
         return std::make_shared<ast::SetComp>(first_expr, generators, token.line, token.column);
     }
 
-    // Check if this is a dict (key: value) or dict comprehension
-    if (!match(TokenType::COLON)) {
-        error("Expected ':' in dictionary or set");
-    }
-
-    // Parse value
-    auto value = parse_expr();
-
-    // Check if this is a dict comprehension: {key: value for ...} or {key: value async for ...}
-    if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
-        auto generators = parse_for_if_clauses();
+    // Check if this is a dict (has colon) or set (has comma/rbrace)
+    if (current().type == TokenType::COLON) {
+        // This is a dict literal or dict comprehension
+        advance();  // consume the colon
+        
+        // Parse value
+        auto value = parse_expr();
+        
+        // Check if this is a dict comprehension: {key: value for ...} or {key: value async for ...}
+        if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
+            auto generators = parse_for_if_clauses();
+            if (!match(TokenType::RBRACE)) {
+                error("Expected '}' after dict comprehension");
+            }
+            return std::make_shared<ast::DictComp>(first_expr, value, generators, token.line, token.column);
+        }
+        
+        // Regular dict literal
+        std::vector<std::shared_ptr<ast::Expr>> keys = {first_expr};
+        std::vector<std::shared_ptr<ast::Expr>> values = {value};
+        
+        while (match(TokenType::COMMA)) {
+            if (current().type == TokenType::RBRACE) {
+                break;  // Trailing comma
+            }
+            keys.push_back(parse_expr());
+            if (!match(TokenType::COLON)) {
+                error("Expected ':' in dictionary");
+            }
+            values.push_back(parse_expr());
+        }
+        
         if (!match(TokenType::RBRACE)) {
-            error("Expected '}' after dict comprehension");
+            error("Expected '}'");
         }
-        return std::make_shared<ast::DictComp>(first_expr, value, generators, token.line, token.column);
-    }
-
-    // Regular dict literal
-    std::vector<std::shared_ptr<ast::Expr>> keys = {first_expr};
-    std::vector<std::shared_ptr<ast::Expr>> values = {value};
-
-    while (match(TokenType::COMMA)) {
-        if (current().type == TokenType::RBRACE) {
-            break;  // Trailing comma
+        
+        return std::make_shared<ast::Dict>(keys, values, token.line, token.column);
+        
+    } else if (current().type == TokenType::COMMA || current().type == TokenType::RBRACE) {
+        // This is a set literal: {1, 2, 3} or {1}
+        std::vector<std::shared_ptr<ast::Expr>> elts = {first_expr};
+        
+        while (match(TokenType::COMMA)) {
+            if (current().type == TokenType::RBRACE) {
+                break;  // Trailing comma
+            }
+            elts.push_back(parse_expr());
         }
-        keys.push_back(parse_expr());
-        if (!match(TokenType::COLON)) {
-            error("Expected ':' in dictionary");
+        
+        if (!match(TokenType::RBRACE)) {
+            error("Expected '}'");
         }
-        values.push_back(parse_expr());
+        
+        return std::make_shared<ast::Set>(elts, ast::ExprContext::Load, token.line, token.column);
+        
+    } else {
+        error("Expected ':', ',' or '}' after expression in braces");
+        return nullptr;  // Unreachable, but satisfies compiler
     }
-
-    if (!match(TokenType::RBRACE)) {
-        error("Expected '}'");
-    }
-
-    return std::make_shared<ast::Dict>(keys, values, token.line, token.column);
 }
 
 inline std::shared_ptr<ast::Expr> Parser::parse_call() {

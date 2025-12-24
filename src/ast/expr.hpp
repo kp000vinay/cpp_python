@@ -189,6 +189,22 @@ private:
     ExprContext ctx_;
 };
 
+// Set literal: {1, 2, 3}
+class Set : public ASTNodeBase {
+public:
+    Set(std::vector<std::shared_ptr<Expr>> elts, ExprContext ctx,
+        int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), elts_(elts), ctx_(ctx) {}
+
+    const std::vector<std::shared_ptr<Expr>>& elts() const { return elts_; }
+    ExprContext ctx() const { return ctx_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::vector<std::shared_ptr<Expr>> elts_;
+    ExprContext ctx_;
+};
+
 // Attribute access (obj.attr)
 class Attribute : public ASTNodeBase {
 public:
@@ -405,6 +421,21 @@ inline std::string Dict::to_string(int indent) const {
 inline std::string Tuple::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "Tuple(\n";
+    oss << indent_str(indent + 1) << "elts=[\n";
+    for (size_t i = 0; i < elts_.size(); ++i) {
+        oss << elts_[i]->to_string(indent + 2);
+        if (i < elts_.size() - 1) oss << ",";
+        oss << "\n";
+    }
+    oss << indent_str(indent + 1) << "],\n";
+    oss << indent_str(indent + 1) << "ctx=" << context_to_string(ctx_) << "\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string Set::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "Set(\n";
     oss << indent_str(indent + 1) << "elts=[\n";
     for (size_t i = 0; i < elts_.size(); ++i) {
         oss << elts_[i]->to_string(indent + 2);
