@@ -61,6 +61,8 @@ declare -a CATEGORIES=(
     "tests/comprehensive"
     "tests/operators"
     "tests/control_flow"
+    "tests/async_await"
+    "tests/async_comprehensions"
 )
 
 for category in "${CATEGORIES[@]}"; do
