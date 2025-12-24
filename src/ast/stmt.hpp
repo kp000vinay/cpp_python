@@ -70,6 +70,26 @@ private:
     std::shared_ptr<Expr> value_;
 };
 
+// Augmented assignment (+=, -=, etc.)
+class AugAssign : public ASTNodeBase {
+public:
+    AugAssign(std::shared_ptr<Expr> target,
+              Operator op,
+              std::shared_ptr<Expr> value,
+              int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), target_(target), op_(op), value_(value) {}
+
+    std::shared_ptr<Expr> target() const { return target_; }
+    Operator op() const { return op_; }
+    std::shared_ptr<Expr> value() const { return value_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::shared_ptr<Expr> target_;
+    Operator op_;
+    std::shared_ptr<Expr> value_;
+};
+
 // Expression statement
 class ExprStmt : public ASTNodeBase {
 public:
@@ -214,6 +234,18 @@ inline std::string Assign::to_string(int indent) const {
     }
     oss << indent_str(indent + 1) << "],\n";
     oss << value_->to_string(indent + 1) << "\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string AugAssign::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "AugAssign(\n";
+    oss << indent_str(indent + 1) << "target=\n";
+    oss << target_->to_string(indent + 2) << ",\n";
+    oss << indent_str(indent + 1) << "op=" << operator_to_string(op_) << ",\n";
+    oss << indent_str(indent + 1) << "value=\n";
+    oss << value_->to_string(indent + 2) << "\n";
     oss << indent_str(indent) << ")";
     return oss.str();
 }

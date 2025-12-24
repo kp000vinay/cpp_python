@@ -42,6 +42,12 @@ private:
     // Parsing methods (recursive descent)
     std::shared_ptr<ast::Module> parse_module();
     std::shared_ptr<ast::Stmt> parse_stmt();
+    
+    // Helper to check if current token is an augmented assignment operator
+    bool is_augmented_assign() const;
+    
+    // Helper to convert augmented assignment token to Operator
+    ast::Operator token_to_operator(TokenType type) const;
     std::shared_ptr<ast::Stmt> parse_function_def();
     std::shared_ptr<ast::Stmt> parse_function_def_raw();
     std::vector<std::shared_ptr<ast::Expr>> parse_decorators();
@@ -193,6 +199,42 @@ inline bool Parser::is_at_end() const {
     return current().type == TokenType::END_OF_FILE;
 }
 
+inline bool Parser::is_augmented_assign() const {
+    TokenType type = current().type;
+    return type == TokenType::PLUSEQUAL ||
+           type == TokenType::MINEQUAL ||
+           type == TokenType::STAREQUAL ||
+           type == TokenType::SLASHEQUAL ||
+           type == TokenType::PERCENTEQUAL ||
+           type == TokenType::DOUBLESTAREQUAL ||
+           type == TokenType::DOUBLESLASHEQUAL ||
+           type == TokenType::AMPEREQUAL ||
+           type == TokenType::VBAREQUAL ||
+           type == TokenType::CIRCUMFLEXEQUAL ||
+           type == TokenType::LEFTSHIFTEQUAL ||
+           type == TokenType::RIGHTSHIFTEQUAL;
+}
+
+inline ast::Operator Parser::token_to_operator(TokenType type) const {
+    switch (type) {
+        case TokenType::PLUSEQUAL: return ast::Operator::Add;
+        case TokenType::MINEQUAL: return ast::Operator::Sub;
+        case TokenType::STAREQUAL: return ast::Operator::Mult;
+        case TokenType::SLASHEQUAL: return ast::Operator::Div;
+        case TokenType::PERCENTEQUAL: return ast::Operator::Mod;
+        case TokenType::DOUBLESTAREQUAL: return ast::Operator::Pow;
+        case TokenType::DOUBLESLASHEQUAL: return ast::Operator::FloorDiv;
+        case TokenType::AMPEREQUAL: return ast::Operator::BitAnd;
+        case TokenType::VBAREQUAL: return ast::Operator::BitOr;
+        case TokenType::CIRCUMFLEXEQUAL: return ast::Operator::BitXor;
+        case TokenType::LEFTSHIFTEQUAL: return ast::Operator::LShift;
+        case TokenType::RIGHTSHIFTEQUAL: return ast::Operator::RShift;
+        default:
+            throw std::runtime_error("Invalid augmented assignment operator");
+            return ast::Operator::Add; // Never reached
+    }
+}
+
 inline void Parser::error(const std::string& message) {
     std::ostringstream oss;
     oss << "Parse error at line " << current().line
@@ -323,8 +365,16 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_stmt() {
                   << ", type=" << static_cast<int>(current().type) << std::endl;
         std::cerr.flush();
         auto expr = parse_expr();
-        if (match(TokenType::EQUAL)) {
-            // This is an assignment
+        if (is_augmented_assign()) {
+            // This is an augmented assignment (+=, -=, etc.)
+            TokenType op_token = current().type;
+            ast::Operator op = token_to_operator(op_token);
+            advance(); // consume the augmented assignment operator
+            auto value = parse_expr();
+            return std::make_shared<ast::AugAssign>(expr, op, value,
+                                                    expr->lineno(), expr->col_offset());
+        } else if (match(TokenType::EQUAL)) {
+            // This is a regular assignment
             auto value = parse_expr();
             std::vector<std::shared_ptr<ast::Expr>> targets = {expr};
             return std::make_shared<ast::Assign>(targets, value,
