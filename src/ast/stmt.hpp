@@ -40,6 +40,30 @@ private:
     std::vector<std::shared_ptr<Expr>> decorator_list_;
 };
 
+// Async function definition (Python 3.5+)
+class AsyncFunctionDef : public ASTNodeBase {
+public:
+    AsyncFunctionDef(const std::string& name,
+                     std::vector<std::string> args,
+                     std::vector<std::shared_ptr<Stmt>> body,
+                     std::vector<std::shared_ptr<Expr>> decorator_list,
+                     int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), name_(name), args_(args), body_(body),
+          decorator_list_(decorator_list) {}
+
+    std::string name() const { return name_; }
+    const std::vector<std::string>& args() const { return args_; }
+    const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
+    const std::vector<std::shared_ptr<Expr>>& decorator_list() const { return decorator_list_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::string name_;
+    std::vector<std::string> args_;
+    std::vector<std::shared_ptr<Stmt>> body_;
+    std::vector<std::shared_ptr<Expr>> decorator_list_;
+};
+
 // Return statement
 class Return : public ASTNodeBase {
 public:
@@ -184,12 +208,61 @@ private:
     std::vector<std::shared_ptr<Stmt>> orelse_;
 };
 
+// Async for loop (Python 3.5+)
+class AsyncFor : public ASTNodeBase {
+public:
+    AsyncFor(std::shared_ptr<Expr> target,
+             std::shared_ptr<Expr> iter,
+             std::vector<std::shared_ptr<Stmt>> body,
+             std::vector<std::shared_ptr<Stmt>> orelse,
+             int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), target_(target), iter_(iter), body_(body), orelse_(orelse) {}
+
+    std::shared_ptr<Expr> target() const { return target_; }
+    std::shared_ptr<Expr> iter() const { return iter_; }
+    const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
+    const std::vector<std::shared_ptr<Stmt>>& orelse() const { return orelse_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::shared_ptr<Expr> target_;
+    std::shared_ptr<Expr> iter_;
+    std::vector<std::shared_ptr<Stmt>> body_;
+    std::vector<std::shared_ptr<Stmt>> orelse_;
+};
+
 // Stmt is already defined in node.hpp as ASTNode
 
 // Implementations
 inline std::string FunctionDef::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "FunctionDef(\n";
+    oss << indent_str(indent + 1) << "name='" << name_ << "',\n";
+    if (!decorator_list_.empty()) {
+        oss << indent_str(indent + 1) << "decorator_list=[\n";
+        for (const auto& deco : decorator_list_) {
+            oss << deco->to_string(indent + 2) << ",\n";
+        }
+        oss << indent_str(indent + 1) << "],\n";
+    }
+    oss << indent_str(indent + 1) << "args=[";
+    for (size_t i = 0; i < args_.size(); ++i) {
+        oss << "'" << args_[i] << "'";
+        if (i < args_.size() - 1) oss << ", ";
+    }
+    oss << "],\n";
+    oss << indent_str(indent + 1) << "body=[\n";
+    for (const auto& stmt : body_) {
+        oss << stmt->to_string(indent + 2) << ",\n";
+    }
+    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string AsyncFunctionDef::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "AsyncFunctionDef(\n";
     oss << indent_str(indent + 1) << "name='" << name_ << "',\n";
     if (!decorator_list_.empty()) {
         oss << indent_str(indent + 1) << "decorator_list=[\n";
@@ -303,6 +376,29 @@ inline std::string While::to_string(int indent) const {
 inline std::string For::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "For(\n";
+    oss << indent_str(indent + 1) << "target=\n";
+    oss << target_->to_string(indent + 2) << ",\n";
+    oss << indent_str(indent + 1) << "iter=\n";
+    oss << iter_->to_string(indent + 2) << ",\n";
+    oss << indent_str(indent + 1) << "body=[\n";
+    for (const auto& stmt : body_) {
+        oss << stmt->to_string(indent + 2) << ",\n";
+    }
+    oss << indent_str(indent + 1) << "],\n";
+    if (!orelse_.empty()) {
+        oss << indent_str(indent + 1) << "orelse=[\n";
+        for (const auto& stmt : orelse_) {
+            oss << stmt->to_string(indent + 2) << ",\n";
+        }
+        oss << indent_str(indent + 1) << "]\n";
+    }
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string AsyncFor::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "AsyncFor(\n";
     oss << indent_str(indent + 1) << "target=\n";
     oss << target_->to_string(indent + 2) << ",\n";
     oss << indent_str(indent + 1) << "iter=\n";
@@ -555,6 +651,23 @@ private:
     std::vector<std::shared_ptr<Stmt>> body_;
 };
 
+// Async with statement (Python 3.5+)
+class AsyncWith : public ASTNodeBase {
+public:
+    AsyncWith(std::vector<WithItem> items,
+              std::vector<std::shared_ptr<Stmt>> body,
+              int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), items_(items), body_(body) {}
+
+    const std::vector<WithItem>& items() const { return items_; }
+    const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::vector<WithItem> items_;
+    std::vector<std::shared_ptr<Stmt>> body_;
+};
+
 // Implementations
 inline std::string ExceptHandler::to_string(int indent) const {
     std::ostringstream oss;
@@ -681,6 +794,32 @@ inline std::string ImportFrom::to_string(int indent) const {
 inline std::string With::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "With(\n";
+    oss << indent_str(indent + 1) << "items=[\n";
+    for (const auto& item : items_) {
+        oss << indent_str(indent + 2) << "WithItem(\n";
+        oss << indent_str(indent + 3) << "context_expr=\n";
+        oss << item.context_expr->to_string(indent + 4) << ",\n";
+        if (item.optional_vars) {
+            oss << indent_str(indent + 3) << "optional_vars=\n";
+            oss << item.optional_vars->to_string(indent + 4) << "\n";
+        } else {
+            oss << indent_str(indent + 3) << "optional_vars=None\n";
+        }
+        oss << indent_str(indent + 2) << "),\n";
+    }
+    oss << indent_str(indent + 1) << "],\n";
+    oss << indent_str(indent + 1) << "body=[\n";
+    for (const auto& stmt : body_) {
+        oss << stmt->to_string(indent + 2) << ",\n";
+    }
+    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string AsyncWith::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "AsyncWith(\n";
     oss << indent_str(indent + 1) << "items=[\n";
     for (const auto& item : items_) {
         oss << indent_str(indent + 2) << "WithItem(\n";

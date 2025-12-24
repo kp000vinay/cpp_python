@@ -29,6 +29,7 @@ enum class TokenType {
     DEF, IF, ELIF, ELSE, FOR, WHILE, RETURN, CLASS, IMPORT, FROM, AS,
     AND, OR, NOT, IN, IS, TRY, EXCEPT, FINALLY, RAISE, WITH, PASS,
     BREAK, CONTINUE, LAMBDA, DEL, ASSERT, GLOBAL, NONLOCAL, YIELD,
+    ASYNC, AWAIT,  // Python 3.5+ async/await keywords
 
     // Operators
     PLUS, MINUS, STAR, SLASH, PERCENT, POWER, FLOOR_DIV, EQUAL,
@@ -208,6 +209,8 @@ namespace {
         {"continue", TokenType::CONTINUE},
         {"lambda", TokenType::LAMBDA},
         {"yield", TokenType::YIELD},
+        {"async", TokenType::ASYNC},  // Python 3.5+
+        {"await", TokenType::AWAIT},  // Python 3.5+
         {"True", TokenType::TRUE},
         {"False", TokenType::FALSE},
         {"None", TokenType::NONE},

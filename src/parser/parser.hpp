@@ -58,6 +58,9 @@ private:
     std::vector<std::shared_ptr<ast::Stmt>> parse_else_block();
     std::shared_ptr<ast::Stmt> parse_while();
     std::shared_ptr<ast::Stmt> parse_for();
+    std::shared_ptr<ast::Stmt> parse_async_function_def();  // Python 3.5+
+    std::shared_ptr<ast::Stmt> parse_async_for();           // Python 3.5+
+    std::shared_ptr<ast::Stmt> parse_async_with();          // Python 3.5+
     std::shared_ptr<ast::Stmt> parse_break();
     std::shared_ptr<ast::Stmt> parse_continue();
     std::shared_ptr<ast::Stmt> parse_expr_stmt();
@@ -319,6 +322,19 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_stmt() {
             std::cerr << "[DEBUG parse_stmt] ERROR: Decorators not followed by def/class" << std::endl;
             std::cerr.flush();
             error("Decorators can only be applied to functions or classes");
+        }
+    }
+    // Handle async keyword (Python 3.5+)
+    if (current().type == TokenType::ASYNC) {
+        advance(); // consume 'async'
+        if (current().type == TokenType::DEF) {
+            return parse_async_function_def();
+        } else if (current().type == TokenType::FOR) {
+            return parse_async_for();
+        } else if (current().type == TokenType::WITH) {
+            return parse_async_with();
+        } else {
+            error("'async' must be followed by 'def', 'for', or 'with'");
         }
     }
     if (current().type == TokenType::DEF) {
@@ -678,6 +694,95 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_for() {
     return std::make_shared<ast::For>(target, iter, body, orelse, for_token.line, for_token.column);
 }
 
+// Parse async function definition (Python 3.5+)
+inline std::shared_ptr<ast::Stmt> Parser::parse_async_function_def() {
+    Token async_token = tokens_[current_token_ - 1]; // 'async' was already consumed
+    if (!match(TokenType::DEF)) {
+        error("Expected 'def' after 'async'");
+    }
+
+    Token name_token = current();
+    if (name_token.type != TokenType::IDENTIFIER) {
+        error("Expected function name");
+    }
+    std::string name = name_token.value;
+    advance();
+
+    if (!match(TokenType::LPAREN)) {
+        error("Expected '(' after function name");
+    }
+
+    std::vector<std::string> args = parse_arg_list();
+
+    if (!match(TokenType::RPAREN)) {
+        error("Expected ')' after arguments");
+    }
+
+    if (!match(TokenType::COLON)) {
+        error("Expected ':' after function signature");
+    }
+
+    // Parse function body
+    std::vector<std::shared_ptr<ast::Stmt>> body;
+    while (!is_at_end() && current().type != TokenType::END_OF_FILE) {
+        if (current().type == TokenType::NEWLINE) {
+            advance();
+            continue;
+        }
+        if (current().type == TokenType::DEF && peek().type == TokenType::IDENTIFIER) {
+            break;
+        }
+        auto stmt = parse_stmt();
+        if (stmt) {
+            body.push_back(stmt);
+        }
+    }
+
+    return std::make_shared<ast::AsyncFunctionDef>(name, args, body, std::vector<std::shared_ptr<ast::Expr>>(),
+                                                    async_token.line, async_token.column);
+}
+
+// Parse async for loop (Python 3.5+)
+inline std::shared_ptr<ast::Stmt> Parser::parse_async_for() {
+    Token async_token = tokens_[current_token_ - 1]; // 'async' was already consumed
+    if (!match(TokenType::FOR)) {
+        error("Expected 'for' after 'async'");
+    }
+
+    auto target = parse_star_targets();
+
+    if (!match(TokenType::IN)) {
+        error("Expected 'in' in async for loop");
+    }
+
+    auto iter = parse_star_expressions();
+
+    if (!match(TokenType::COLON)) {
+        error("Expected ':' after async for loop");
+    }
+
+    // Parse block (body)
+    std::vector<std::shared_ptr<ast::Stmt>> body;
+    while (!is_at_end() && current().type != TokenType::END_OF_FILE) {
+        if (current().type == TokenType::NEWLINE) {
+            advance();
+            continue;
+        }
+        if (current().type == TokenType::ELSE || current().type == TokenType::DEF) {
+            break;
+        }
+        auto stmt = parse_stmt();
+        if (stmt) {
+            body.push_back(stmt);
+        }
+    }
+
+    // Parse else clause if present
+    std::vector<std::shared_ptr<ast::Stmt>> orelse = parse_else_block();
+
+    return std::make_shared<ast::AsyncFor>(target, iter, body, orelse, async_token.line, async_token.column);
+}
+
 inline std::shared_ptr<ast::Stmt> Parser::parse_break() {
     Token break_token = current();
     if (!match(TokenType::BREAK)) {
@@ -1021,6 +1126,10 @@ inline std::shared_ptr<ast::Expr> Parser::parse_atom() {
     } else if (match(TokenType::YIELD)) {
         // Yield expression
         return parse_yield_expr();
+    } else if (match(TokenType::AWAIT)) {
+        // Await expression (Python 3.5+)
+        auto value = parse_primary();
+        return std::make_shared<ast::Await>(value, token.line, token.column);
     } else if (current().type == TokenType::ELLIPSIS) {
         // Ellipsis expression - token already matched, just create the node
         Token ellipsis_token = current();
@@ -1041,8 +1150,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_atom() {
 
         auto expr = parse_expr();
 
-        // Check if it's a generator expression: (expr for ...)
-        if (current().type == TokenType::FOR) {
+        // Check if it's a generator expression: (expr for ...) or (expr async for ...)
+        if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
             auto generators = parse_for_if_clauses();
             if (!match(TokenType::RPAREN)) {
                 error("Expected ')' after generator expression");
@@ -1365,8 +1474,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_list() {
     }
     std::cerr.flush();
 
-    // Check if this is a list comprehension (next token is 'for')
-    if (current().type == TokenType::FOR) {
+    // Check if this is a list comprehension (next token is 'for' or 'async')
+    if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
         std::cerr << "[DEBUG parse_list] Detected list comprehension" << std::endl;
         std::cerr.flush();
         // Parse comprehension clauses
@@ -1436,8 +1545,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_dict() {
     // Parse first expression
     auto first_expr = parse_expr();
 
-    // Check if this is a set comprehension: {expr for ...}
-    if (current().type == TokenType::FOR) {
+    // Check if this is a set comprehension: {expr for ...} or {expr async for ...}
+    if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
         auto generators = parse_for_if_clauses();
         if (!match(TokenType::RBRACE)) {
             error("Expected '}' after set comprehension");
@@ -1453,8 +1562,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_dict() {
     // Parse value
     auto value = parse_expr();
 
-    // Check if this is a dict comprehension: {key: value for ...}
-    if (current().type == TokenType::FOR) {
+    // Check if this is a dict comprehension: {key: value for ...} or {key: value async for ...}
+    if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
         auto generators = parse_for_if_clauses();
         if (!match(TokenType::RBRACE)) {
             error("Expected '}' after dict comprehension");
@@ -2317,6 +2426,53 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_with_stmt() {
     return std::make_shared<ast::With>(items, body, with_token.line, with_token.column);
 }
 
+// Parse async with statement (Python 3.5+)
+inline std::shared_ptr<ast::Stmt> Parser::parse_async_with() {
+    Token async_token = tokens_[current_token_ - 1]; // 'async' was already consumed
+    if (!match(TokenType::WITH)) {
+        error("Expected 'with' after 'async'");
+    }
+
+    std::vector<ast::WithItem> items;
+
+    // Check for parenthesized form: 'with' '(' items ')'
+    bool has_parens = match(TokenType::LPAREN);
+
+    // Parse first with_item
+    items.push_back(parse_with_item());
+
+    // Parse remaining items (comma-separated)
+    while (match(TokenType::COMMA)) {
+        // Check for optional trailing comma before closing paren
+        if (has_parens && current().type == TokenType::RPAREN) {
+            break;
+        }
+        items.push_back(parse_with_item());
+    }
+
+    // Consume closing paren if present
+    if (has_parens) {
+        if (!match(TokenType::RPAREN)) {
+            error("Expected ')' after with items");
+        }
+    }
+
+    // Expect colon
+    if (!match(TokenType::COLON)) {
+        error("Expected ':' after async with statement");
+    }
+
+    // Parse body
+    std::vector<std::shared_ptr<ast::Stmt>> body;
+    while (current().type != TokenType::END_OF_FILE &&
+           current().type != TokenType::DEDENT &&
+           current().type != TokenType::NEWLINE) {
+        body.push_back(parse_stmt());
+    }
+
+    return std::make_shared<ast::AsyncWith>(items, body, async_token.line, async_token.column);
+}
+
 // with_item: expression ['as' star_target]
 // Matches CPython's with_item_rule
 inline ast::WithItem Parser::parse_with_item() {
@@ -2391,8 +2547,8 @@ inline std::vector<ast::Comprehension> Parser::parse_for_if_clauses() {
     generators.push_back(parse_for_if_clause());
 
     // Parse additional for/if clauses
-    while (current().type == TokenType::FOR || current().type == TokenType::IF) {
-        if (current().type == TokenType::FOR) {
+    while (current().type == TokenType::FOR || current().type == TokenType::IF || current().type == TokenType::ASYNC) {
+        if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
             generators.push_back(parse_for_if_clause());
         } else if (current().type == TokenType::IF) {
             // Additional if condition for the last comprehension
@@ -2408,9 +2564,16 @@ inline std::vector<ast::Comprehension> Parser::parse_for_if_clauses() {
     return generators;
 }
 
-// for_if_clause: 'for' star_targets 'in' disjunction ('if' disjunction)*
-// Matches CPython's for_if_clause rule
+// for_if_clause: ['async'] 'for' star_targets 'in' disjunction ('if' disjunction)*
+// Matches CPython's for_if_clause rule (Python 3.6+ adds async support)
 inline ast::Comprehension Parser::parse_for_if_clause() {
+    // Check for 'async' keyword (Python 3.6+)
+    bool is_async = false;
+    if (current().type == TokenType::ASYNC) {
+        is_async = true;
+        advance();  // consume 'async'
+    }
+
     if (!match(TokenType::FOR)) {
         error("Expected 'for' in comprehension");
     }
@@ -2432,7 +2595,7 @@ inline ast::Comprehension Parser::parse_for_if_clause() {
         ifs.push_back(parse_expr());
     }
 
-    return ast::Comprehension(target, iter, ifs);
+    return ast::Comprehension(target, iter, ifs, is_async);
 }
 
 // slice: [lower] ':' [upper] [ ':' [step] ]
