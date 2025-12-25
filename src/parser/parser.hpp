@@ -583,6 +583,7 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_function_def() {
         return std::make_shared<ast::FunctionDef>(
             func->name(), func->args(), func->body(), decorators,
             func->returns(),  // preserve returns annotation
+            func->type_params(),  // PEP 695: preserve type params
             func->lineno(), func->col_offset());
     }
     return func_def;
@@ -599,6 +600,14 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_function_def_raw() {
     }
     std::string name = name_token.value;
     advance();
+
+    // PEP 695: Parse optional type parameters: [T], [T, U], [T: int], etc.
+    std::vector<std::shared_ptr<ast::TypeParam>> type_params;
+    if (current().type == TokenType::LBRACKET) {
+        std::cerr << "[DEBUG parse_function_def_raw] Found type params, parsing..." << std::endl;
+        type_params = parse_type_params();
+        std::cerr << "[DEBUG parse_function_def_raw] Parsed " << type_params.size() << " type params" << std::endl;
+    }
 
     if (!match(TokenType::LPAREN)) {
         error("Expected '(' after function name");
@@ -641,6 +650,7 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_function_def_raw() {
 
     return std::make_shared<ast::FunctionDef>(name, args, body, std::vector<std::shared_ptr<ast::Expr>>(),
                                              returns,  // return annotation
+                                             type_params,  // PEP 695: Generic type parameters
                                              name_token.line, name_token.column);
 }
 
@@ -2419,6 +2429,7 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_class_def() {
     if (auto cls = std::dynamic_pointer_cast<ast::ClassDef>(class_def)) {
         return std::make_shared<ast::ClassDef>(
             cls->name(), cls->bases(), cls->body(), decorators,
+            cls->type_params(),  // PEP 695: preserve type params
             cls->lineno(), cls->col_offset());
     }
     return class_def;
@@ -2436,6 +2447,14 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_class_def_raw() {
     std::string name = current().value;
     Token name_token = current();
     advance();
+
+    // PEP 695: Parse optional type parameters: [T], [K, V], etc.
+    std::vector<std::shared_ptr<ast::TypeParam>> type_params;
+    if (current().type == TokenType::LBRACKET) {
+        std::cerr << "[DEBUG parse_class_def_raw] Found type params, parsing..." << std::endl;
+        type_params = parse_type_params();
+        std::cerr << "[DEBUG parse_class_def_raw] Parsed " << type_params.size() << " type params" << std::endl;
+    }
 
     // Parse optional base classes: ['(' [arguments] ')']
     std::vector<std::shared_ptr<ast::Expr>> bases;
@@ -2475,6 +2494,7 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_class_def_raw() {
     }
 
     return std::make_shared<ast::ClassDef>(name, bases, body, std::vector<std::shared_ptr<ast::Expr>>(),
+                                          type_params,  // PEP 695: Generic type parameters
                                           class_token.line, class_token.column);
 }
 
