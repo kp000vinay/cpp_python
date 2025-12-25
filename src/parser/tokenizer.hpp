@@ -31,6 +31,7 @@ enum class TokenType {
     BREAK, CONTINUE, LAMBDA, DEL, ASSERT, GLOBAL, NONLOCAL, YIELD,
     ASYNC, AWAIT,  // Python 3.5+ async/await keywords
     MATCH, CASE,   // Python 3.10+ pattern matching keywords
+    TYPE,          // Python 3.12+ type alias soft keyword
 
     // Operators
     PLUS, MINUS, STAR, SLASH, PERCENT, POWER, FLOOR_DIV, EQUAL,
@@ -194,7 +195,7 @@ struct KeywordEntry {
  * Compile-time keyword table
  * Sorted by first character for binary search optimization
  */
-constexpr std::array<KeywordEntry, 37> KEYWORD_TABLE = {{
+constexpr std::array<KeywordEntry, 38> KEYWORD_TABLE = {{
     {"False", TokenType::FALSE},
     {"None", TokenType::NONE},
     {"True", TokenType::TRUE},
@@ -229,6 +230,7 @@ constexpr std::array<KeywordEntry, 37> KEYWORD_TABLE = {{
     {"raise", TokenType::RAISE},
     {"return", TokenType::RETURN},
     {"try", TokenType::TRY},
+    {"type", TokenType::TYPE},
     {"while", TokenType::WHILE},
     {"with", TokenType::WITH},
     {"yield", TokenType::YIELD},
@@ -298,6 +300,7 @@ namespace {
         {"await", TokenType::AWAIT},  // Python 3.5+
         {"match", TokenType::MATCH},  // Python 3.10+ soft keyword
         {"case", TokenType::CASE},    // Python 3.10+ soft keyword
+        {"type", TokenType::TYPE},    // Python 3.12+ soft keyword
         {"True", TokenType::TRUE},
         {"False", TokenType::FALSE},
         {"None", TokenType::NONE},

@@ -782,6 +782,161 @@ private:
     std::vector<match_case> cases_;  // List of case blocks
 };
 
+// ============================================================================
+// Type Parameter AST Nodes (Python 3.12+ PEP 695)
+// ============================================================================
+
+/**
+ * Base class for type parameters
+ * Reference: Python.asdl - type_param
+ */
+class TypeParam : public ASTNodeBase {
+public:
+    TypeParam(int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset) {}
+    
+    virtual ~TypeParam() = default;
+    virtual std::string to_string(int indent = 0) const override = 0;
+};
+
+/**
+ * TypeVar - A type variable parameter
+ * Reference: Python.asdl - TypeVar(identifier name, expr? bound, expr? default_value)
+ * 
+ * Examples:
+ *   T           - simple type variable
+ *   T: int      - type variable with bound
+ *   T = int     - type variable with default (Python 3.13+)
+ */
+class TypeVar : public TypeParam {
+public:
+    TypeVar(const std::string& name,
+            std::shared_ptr<Expr> bound,          // Optional bound constraint
+            std::shared_ptr<Expr> default_value,  // Optional default (Python 3.13+)
+            int lineno, int col_offset)
+        : TypeParam(lineno, col_offset),
+          name_(name),
+          bound_(bound),
+          default_value_(default_value) {}
+
+    const std::string& name() const { return name_; }
+    std::shared_ptr<Expr> bound() const { return bound_; }
+    std::shared_ptr<Expr> default_value() const { return default_value_; }
+    
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::string name_;
+    std::shared_ptr<Expr> bound_;
+    std::shared_ptr<Expr> default_value_;
+};
+
+/**
+ * ParamSpec - A parameter specification variable
+ * Reference: Python.asdl - ParamSpec(identifier name, expr? default_value)
+ * 
+ * Examples:
+ *   **P         - parameter specification
+ *   **P = ...   - with default (Python 3.13+)
+ */
+class ParamSpec : public TypeParam {
+public:
+    ParamSpec(const std::string& name,
+              std::shared_ptr<Expr> default_value,  // Optional default (Python 3.13+)
+              int lineno, int col_offset)
+        : TypeParam(lineno, col_offset),
+          name_(name),
+          default_value_(default_value) {}
+
+    const std::string& name() const { return name_; }
+    std::shared_ptr<Expr> default_value() const { return default_value_; }
+    
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::string name_;
+    std::shared_ptr<Expr> default_value_;
+};
+
+/**
+ * TypeVarTuple - A type variable tuple (variadic type parameter)
+ * Reference: Python.asdl - TypeVarTuple(identifier name, expr? default_value)
+ * 
+ * Examples:
+ *   *Ts         - type variable tuple
+ *   *Ts = ...   - with default (Python 3.13+)
+ */
+class TypeVarTuple : public TypeParam {
+public:
+    TypeVarTuple(const std::string& name,
+                 std::shared_ptr<Expr> default_value,  // Optional default (Python 3.13+)
+                 int lineno, int col_offset)
+        : TypeParam(lineno, col_offset),
+          name_(name),
+          default_value_(default_value) {}
+
+    const std::string& name() const { return name_; }
+    std::shared_ptr<Expr> default_value() const { return default_value_; }
+    
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::string name_;
+    std::shared_ptr<Expr> default_value_;
+};
+
+// ============================================================================
+// TypeAlias Statement Node (Python 3.12+ PEP 695)
+// ============================================================================
+
+/**
+ * TypeAlias - A type alias statement
+ * Reference: Python.asdl - TypeAlias(expr name, type_param* type_params, expr value)
+ * 
+ * Represents the Python 3.12+ type alias syntax:
+ *   type Point = tuple[float, float]
+ *   type Vector[T] = list[T]
+ *   type Callback[**P, R] = Callable[P, R]
+ * 
+ * Grammar (from python.gram):
+ *   type_alias: "type" NAME [type_params] '=' expression
+ */
+class TypeAlias : public ASTNodeBase {
+public:
+    /**
+     * Construct a TypeAlias node
+     * 
+     * @param name        The alias name as a Name expression
+     * @param type_params List of type parameters (empty if non-generic)
+     * @param value       The type expression being aliased
+     * @param lineno      Source line number
+     * @param col_offset  Source column offset
+     */
+    TypeAlias(std::shared_ptr<Expr> name,
+              std::vector<std::shared_ptr<TypeParam>> type_params,
+              std::shared_ptr<Expr> value,
+              int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset),
+          name_(name),
+          type_params_(std::move(type_params)),
+          value_(value) {}
+
+    // Accessors
+    std::shared_ptr<Expr> name() const { return name_; }
+    const std::vector<std::shared_ptr<TypeParam>>& type_params() const { return type_params_; }
+    std::shared_ptr<Expr> value() const { return value_; }
+    
+    // Check if this is a generic type alias
+    bool is_generic() const { return !type_params_.empty(); }
+    
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::shared_ptr<Expr> name_;                          // The alias name (as Name expr)
+    std::vector<std::shared_ptr<TypeParam>> type_params_; // Generic type parameters
+    std::shared_ptr<Expr> value_;                         // The aliased type expression
+};
+
 // Implementations
 inline std::string ExceptHandler::to_string(int indent) const {
     std::ostringstream oss;
@@ -1063,9 +1218,79 @@ inline std::string Match::to_string(int indent) const {
     return oss.str();
 }
 
+// TypeVar to_string implementation
+inline std::string TypeVar::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "TypeVar(\n";
+    oss << indent_str(indent + 1) << "name=\"" << name_ << "\"";
+    if (bound_) {
+        oss << ",\n" << indent_str(indent + 1) << "bound=\n";
+        oss << bound_->to_string(indent + 2);
+    }
+    if (default_value_) {
+        oss << ",\n" << indent_str(indent + 1) << "default_value=\n";
+        oss << default_value_->to_string(indent + 2);
+    }
+    oss << "\n" << indent_str(indent) << ")";
+    return oss.str();
+}
+
+// ParamSpec to_string implementation
+inline std::string ParamSpec::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "ParamSpec(\n";
+    oss << indent_str(indent + 1) << "name=\"" << name_ << "\"";
+    if (default_value_) {
+        oss << ",\n" << indent_str(indent + 1) << "default_value=\n";
+        oss << default_value_->to_string(indent + 2);
+    }
+    oss << "\n" << indent_str(indent) << ")";
+    return oss.str();
+}
+
+// TypeVarTuple to_string implementation
+inline std::string TypeVarTuple::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "TypeVarTuple(\n";
+    oss << indent_str(indent + 1) << "name=\"" << name_ << "\"";
+    if (default_value_) {
+        oss << ",\n" << indent_str(indent + 1) << "default_value=\n";
+        oss << default_value_->to_string(indent + 2);
+    }
+    oss << "\n" << indent_str(indent) << ")";
+    return oss.str();
+}
+
+// TypeAlias to_string implementation
+inline std::string TypeAlias::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "TypeAlias(\n";
+    
+    // Name
+    oss << indent_str(indent + 1) << "name=\n";
+    oss << name_->to_string(indent + 2) << ",\n";
+    
+    // Type parameters (if any)
+    if (!type_params_.empty()) {
+        oss << indent_str(indent + 1) << "type_params=[\n";
+        for (const auto& param : type_params_) {
+            oss << param->to_string(indent + 2) << ",\n";
+        }
+        oss << indent_str(indent + 1) << "],\n";
+    } else {
+        oss << indent_str(indent + 1) << "type_params=[],\n";
+    }
+    
+    // Value (the aliased type)
+    oss << indent_str(indent + 1) << "value=\n";
+    oss << value_->to_string(indent + 2) << "\n";
+    
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
 } // namespace ast
 } // namespace cpython_cpp
-
 #endif // CPYTHON_CPP_AST_STMT_HPP
 
 
