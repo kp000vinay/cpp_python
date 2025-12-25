@@ -477,9 +477,35 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_stmt() {
         return nullptr; // Never reached, but satisfies compiler
     } else {
         // Try to parse as expression or assignment
+        // First, check if this looks like a tuple unpacking assignment: a, b = ... or a, *rest = ...
         std::cerr << "[DEBUG parse_stmt] Falling through to expression/assignment, token=" << current_token_
                   << ", type=" << static_cast<int>(current().type) << std::endl;
         std::cerr.flush();
+        
+        // Check if this is a tuple unpacking pattern by looking for comma or star
+        // We need to handle: a, b = x, y  or  a, *rest, b = items
+        size_t saved_pos = current_token_;
+        bool is_tuple_unpack = false;
+        
+        // Look ahead to see if we have a tuple pattern (identifier followed by comma)
+        // or starred pattern (*identifier)
+        if (current().type == TokenType::STAR ||
+            (current().type == TokenType::IDENTIFIER && peek().type == TokenType::COMMA)) {
+            // This might be a tuple unpacking assignment
+            // Try to parse as star_targets and see if followed by =
+            auto targets = parse_star_targets();
+            if (current().type == TokenType::EQUAL) {
+                advance();  // consume '='
+                auto value = parse_star_expressions();
+                std::vector<std::shared_ptr<ast::Expr>> target_list = {targets};
+                return std::make_shared<ast::Assign>(target_list, value,
+                                                    targets->lineno(), targets->col_offset());
+            } else {
+                // Not an assignment, restore position and parse as expression
+                current_token_ = saved_pos;
+            }
+        }
+        
         auto expr = parse_expr();
         
         // Check for annotated assignment: x: int = 5 or y: str
@@ -2032,14 +2058,24 @@ inline std::shared_ptr<ast::Expr> Parser::parse_star_targets() {
 }
 
 // star_target: '*' star_target | target_with_star_atom
-// Simplified: just parse as a simple target (name, attribute, subscript)
+// Parses assignment targets including starred expressions (*rest)
 // Key: This must NOT parse 'in' as a comparison operator
 inline std::shared_ptr<ast::Expr> Parser::parse_star_target() {
     Token token = current();
 
-    // Check for '*' (starred target) - not yet implemented
+    // Check for '*' (starred target) - e.g., *rest in "a, *rest, b = items"
     if (match(TokenType::STAR)) {
-        error("Starred targets not yet supported");
+        Token star_token = token;
+        // Parse the target after the star
+        if (current().type != TokenType::IDENTIFIER) {
+            error("Expected identifier after '*' in starred target");
+        }
+        Token name_token = current();
+        advance();  // consume identifier
+        auto name = std::make_shared<ast::Name>(name_token.value, ast::ExprContext::Store,
+                                               name_token.line, name_token.column);
+        return std::make_shared<ast::Starred>(name, ast::ExprContext::Store,
+                                              star_token.line, star_token.column);
     }
 
     // Parse as simple name (most common case: for x in ...)
@@ -2094,10 +2130,14 @@ inline std::shared_ptr<ast::Expr> Parser::parse_star_expressions() {
 // The key is that expression will parse comparisons, but in the context of 'for x in y',
 // the 'in' is already consumed as a keyword, so expression parsing won't see it as comparison
 inline std::shared_ptr<ast::Expr> Parser::parse_star_expression() {
-    // Check for '*' (starred expression) - not yet implemented
+    // Check for '*' (starred expression) - e.g., *items in "[*items, extra]"
     if (current().type == TokenType::STAR) {
-        // TODO: Handle starred expressions
-        error("Starred expressions not yet supported");
+        Token star_token = current();
+        advance();  // consume '*'
+        // Parse the expression after the star (bitwise_or level, not full expression)
+        auto value = parse_bitwise_or();
+        return std::make_shared<ast::Starred>(value, ast::ExprContext::Load,
+                                              star_token.line, star_token.column);
     }
 
     // Otherwise parse as regular expression (matches CPython: star_expression -> expression)
