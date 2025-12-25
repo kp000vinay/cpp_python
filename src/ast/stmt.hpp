@@ -16,6 +16,9 @@ namespace ast {
  * Reference: Parser/Python.asdl (stmt definitions)
  */
 
+// Forward declaration for TypeParam (defined later in this file)
+class TypeParam;
+
 // Function argument with optional annotation (Python 3.5+)
 struct arg {
     std::string arg_name;                      // Parameter name
@@ -25,7 +28,7 @@ struct arg {
         : arg_name(name), annotation(ann) {}
 };
 
-// Function definition
+// Function definition (with PEP 695 generic type support)
 class FunctionDef : public ASTNodeBase {
 public:
     FunctionDef(const std::string& name,
@@ -33,15 +36,17 @@ public:
                 std::vector<std::shared_ptr<Stmt>> body,
                 std::vector<std::shared_ptr<Expr>> decorator_list,
                 std::shared_ptr<Expr> returns,  // Return type annotation (optional)
+                std::vector<std::shared_ptr<TypeParam>> type_params,  // PEP 695: Generic type parameters
                 int lineno, int col_offset)
         : ASTNodeBase(lineno, col_offset), name_(name), args_(args), body_(body),
-          decorator_list_(decorator_list), returns_(returns) {}
+          decorator_list_(decorator_list), returns_(returns), type_params_(type_params) {}
 
     std::string name() const { return name_; }
     const std::vector<arg>& args() const { return args_; }
     const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
     const std::vector<std::shared_ptr<Expr>>& decorator_list() const { return decorator_list_; }
     std::shared_ptr<Expr> returns() const { return returns_; }
+    const std::vector<std::shared_ptr<TypeParam>>& type_params() const { return type_params_; }  // PEP 695
     std::string to_string(int indent = 0) const override;
 
 private:
@@ -50,6 +55,7 @@ private:
     std::vector<std::shared_ptr<Stmt>> body_;
     std::vector<std::shared_ptr<Expr>> decorator_list_;
     std::shared_ptr<Expr> returns_;  // Return type annotation
+    std::vector<std::shared_ptr<TypeParam>> type_params_;  // PEP 695: Generic type parameters
 };
 
 // Async function definition (Python 3.5+)
@@ -280,6 +286,10 @@ inline std::string FunctionDef::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "FunctionDef(\n";
     oss << indent_str(indent + 1) << "name='" << name_ << "',\n";
+    // PEP 695: Print type_params count (detailed output is at end of file)
+    if (!type_params_.empty()) {
+        oss << indent_str(indent + 1) << "type_params=[" << type_params_.size() << " params],\n";
+    }
     if (!decorator_list_.empty()) {
         oss << indent_str(indent + 1) << "decorator_list=[\n";
         for (const auto& deco : decorator_list_) {
@@ -661,14 +671,16 @@ public:
              std::vector<std::shared_ptr<Expr>> bases,
              std::vector<std::shared_ptr<Stmt>> body,
              std::vector<std::shared_ptr<Expr>> decorator_list,
+             std::vector<std::shared_ptr<TypeParam>> type_params,  // PEP 695: Generic type parameters
              int lineno, int col_offset)
         : ASTNodeBase(lineno, col_offset), name_(name), bases_(bases), body_(body),
-          decorator_list_(decorator_list) {}
+          decorator_list_(decorator_list), type_params_(type_params) {}
 
     std::string name() const { return name_; }
     const std::vector<std::shared_ptr<Expr>>& bases() const { return bases_; }
     const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
     const std::vector<std::shared_ptr<Expr>>& decorator_list() const { return decorator_list_; }
+    const std::vector<std::shared_ptr<TypeParam>>& type_params() const { return type_params_; }  // PEP 695
     std::string to_string(int indent = 0) const override;
 
 private:
@@ -676,6 +688,7 @@ private:
     std::vector<std::shared_ptr<Expr>> bases_;  // Empty if no inheritance
     std::vector<std::shared_ptr<Stmt>> body_;
     std::vector<std::shared_ptr<Expr>> decorator_list_;
+    std::vector<std::shared_ptr<TypeParam>> type_params_;  // PEP 695: Generic type parameters
 };
 
 // Import alias (name [as asname])
@@ -1052,6 +1065,10 @@ inline std::string ClassDef::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "ClassDef(\n";
     oss << indent_str(indent + 1) << "name=\"" << name_ << "\",\n";
+    // PEP 695: Print type_params count (detailed output is at end of file)
+    if (!type_params_.empty()) {
+        oss << indent_str(indent + 1) << "type_params=[" << type_params_.size() << " params],\n";
+    }
     if (!decorator_list_.empty()) {
         oss << indent_str(indent + 1) << "decorator_list=[\n";
         for (const auto& deco : decorator_list_) {
