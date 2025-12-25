@@ -2,6 +2,7 @@
 #define CPYTHON_CPP_PARSER_HPP
 
 #include "tokenizer.hpp"
+#include "combinators.hpp"
 #include "../ast/module.hpp"
 #include "../ast/stmt.hpp"
 #include "../ast/expr.hpp"
@@ -9,16 +10,66 @@
 #include <vector>
 #include <stdexcept>
 #include <sstream>
+#include <unordered_map>
+#include <functional>
+#include <any>
 
 namespace cpython_cpp {
 namespace parser {
 
+// ============================================================================
+// Template-based PEG Parser with Memoization
+// ============================================================================
+
 /**
- * Parser - converts tokens to AST
+ * MemoKey - Key for memoization table
+ * Combines rule identifier and position for unique cache lookup
+ */
+struct MemoKey {
+    size_t rule_id;
+    size_t position;
+    
+    bool operator==(const MemoKey& other) const {
+        return rule_id == other.rule_id && position == other.position;
+    }
+};
+
+struct MemoKeyHash {
+    size_t operator()(const MemoKey& key) const {
+        return std::hash<size_t>()(key.rule_id) ^ (std::hash<size_t>()(key.position) << 1);
+    }
+};
+
+/**
+ * MemoEntry - Entry in memoization table
+ * Stores the result of a parse attempt and the end position
+ */
+struct MemoEntry {
+    std::any result;
+    size_t end_position;
+    bool success;
+};
+
+/**
+ * Template helper for rule identification
+ * Each parsing rule gets a unique compile-time ID
+ */
+template<auto RuleFunc>
+struct RuleId {
+    static size_t get() {
+        static const size_t id = reinterpret_cast<size_t>(&RuleFunc);
+        return id;
+    }
+};
+
+/**
+ * Parser - Template-based PEG parser with memoization
  * Reference: Parser/parser.c, Parser/pegen.c
  *
- * This is a simplified recursive descent parser.
- * CPython uses a PEG parser generated from Grammar/python.gram
+ * This parser uses:
+ * - Template-based rule composition
+ * - Memoization (packrat parsing) for linear-time complexity
+ * - CPython-compatible grammar rules
  */
 class Parser {
 public:
@@ -31,6 +82,43 @@ private:
     Tokenizer tokenizer_;
     std::vector<Token> tokens_;
     size_t current_token_;
+    
+    // Memoization table for packrat parsing
+    mutable std::unordered_map<MemoKey, MemoEntry, MemoKeyHash> memo_table_;
+    
+    // Template-based memoization helper
+    template<typename ResultType, typename ParseFunc>
+    ResultType memoize(size_t rule_id, ParseFunc&& parse_func) {
+        MemoKey key{rule_id, current_token_};
+        
+        auto it = memo_table_.find(key);
+        if (it != memo_table_.end()) {
+            // Cache hit - restore position and return cached result
+            current_token_ = it->second.end_position;
+            if (it->second.success) {
+                return std::any_cast<ResultType>(it->second.result);
+            }
+            return nullptr;
+        }
+        
+        // Cache miss - parse and store result
+        size_t start_pos = current_token_;
+        ResultType result = parse_func();
+        
+        MemoEntry entry;
+        entry.end_position = current_token_;
+        entry.success = (result != nullptr);
+        if (entry.success) {
+            entry.result = result;
+        }
+        memo_table_[key] = entry;
+        
+        return result;
+    }
+    
+    // Mark/reset for backtracking (PEG-style)
+    size_t mark() const { return current_token_; }
+    void reset(size_t pos) { current_token_ = pos; }
 
     // Current token helpers
     Token current() const;

@@ -178,7 +178,90 @@ private:
     Token read_fstring_end();
 };
 
-// Keyword map
+// ============================================================================
+// Compile-time Keyword Lookup
+// ============================================================================
+
+/**
+ * Constexpr keyword entry for compile-time lookup
+ */
+struct KeywordEntry {
+    const char* keyword;
+    TokenType type;
+};
+
+/**
+ * Compile-time keyword table
+ * Sorted by first character for binary search optimization
+ */
+constexpr std::array<KeywordEntry, 37> KEYWORD_TABLE = {{
+    {"False", TokenType::FALSE},
+    {"None", TokenType::NONE},
+    {"True", TokenType::TRUE},
+    {"and", TokenType::AND},
+    {"as", TokenType::AS},
+    {"assert", TokenType::ASSERT},
+    {"async", TokenType::ASYNC},
+    {"await", TokenType::AWAIT},
+    {"break", TokenType::BREAK},
+    {"case", TokenType::CASE},
+    {"class", TokenType::CLASS},
+    {"continue", TokenType::CONTINUE},
+    {"def", TokenType::DEF},
+    {"del", TokenType::DEL},
+    {"elif", TokenType::ELIF},
+    {"else", TokenType::ELSE},
+    {"except", TokenType::EXCEPT},
+    {"finally", TokenType::FINALLY},
+    {"for", TokenType::FOR},
+    {"from", TokenType::FROM},
+    {"global", TokenType::GLOBAL},
+    {"if", TokenType::IF},
+    {"import", TokenType::IMPORT},
+    {"in", TokenType::IN},
+    {"is", TokenType::IS},
+    {"lambda", TokenType::LAMBDA},
+    {"match", TokenType::MATCH},
+    {"nonlocal", TokenType::NONLOCAL},
+    {"not", TokenType::NOT},
+    {"or", TokenType::OR},
+    {"pass", TokenType::PASS},
+    {"raise", TokenType::RAISE},
+    {"return", TokenType::RETURN},
+    {"try", TokenType::TRY},
+    {"while", TokenType::WHILE},
+    {"with", TokenType::WITH},
+    {"yield", TokenType::YIELD},
+}};
+
+/**
+ * Template-based keyword lookup with compile-time optimization
+ */
+template<size_t N>
+constexpr std::optional<TokenType> lookup_keyword_impl(
+    const char* word, 
+    const std::array<KeywordEntry, N>& table
+) {
+    for (const auto& entry : table) {
+        bool match = true;
+        const char* k = entry.keyword;
+        const char* w = word;
+        while (*k && *w) {
+            if (*k != *w) {
+                match = false;
+                break;
+            }
+            ++k;
+            ++w;
+        }
+        if (match && *k == '\0' && *w == '\0') {
+            return entry.type;
+        }
+    }
+    return std::nullopt;
+}
+
+// Runtime keyword map (for compatibility)
 namespace {
     const std::unordered_map<std::string, TokenType> keywords = {
         {"def", TokenType::DEF},
