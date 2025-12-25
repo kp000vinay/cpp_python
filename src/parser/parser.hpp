@@ -200,6 +200,7 @@ private:
     // Try/except/finally (matches try_stmt_rule, except_block_rule, finally_block_rule)
     std::shared_ptr<ast::Stmt> parse_try_stmt();
     std::shared_ptr<ast::ExceptHandler> parse_except_block();
+    std::shared_ptr<ast::ExceptHandler> parse_except_star_block();  // Python 3.11+ except*
     std::vector<std::shared_ptr<ast::Stmt>> parse_finally_block();
 
     // Class definition (matches class_def_rule, class_def_raw_rule)
@@ -2177,40 +2178,81 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_try_stmt() {
         }
     }
 
-    // Try to parse except blocks first (matches CPython: 'try' ':' block except_block+ else_block? finally_block?)
+    // Determine if this is a regular try/except or try/except* (TryStar)
     size_t saved_pos = current_token_;
     std::vector<std::shared_ptr<ast::ExceptHandler>> handlers;
     std::vector<std::shared_ptr<ast::Stmt>> orelse;
     std::vector<std::shared_ptr<ast::Stmt>> finalbody;
+    bool is_except_star = false;
 
-    // Try parsing except blocks
-    while (current().type == TokenType::EXCEPT) {
-        auto handler = parse_except_block();
-        if (handler) {
-            handlers.push_back(handler);
-        } else {
-            break;
-        }
+    // Check if we have except* (look for EXCEPT followed by STAR)
+    if (current().type == TokenType::EXCEPT && peek().type == TokenType::STAR) {
+        is_except_star = true;
     }
 
-    if (!handlers.empty()) {
-        // We have except blocks, try else and finally
-        orelse = parse_else_block();
-        if (current().type == TokenType::FINALLY) {
-            finalbody = parse_finally_block();
+    if (is_except_star) {
+        // Parse except* blocks (TryStar) - Python 3.11+ exception groups
+        while (current().type == TokenType::EXCEPT && peek().type == TokenType::STAR) {
+            auto handler = parse_except_star_block();
+            if (handler) {
+                handlers.push_back(handler);
+            } else {
+                break;
+            }
         }
+
+        // Validate: cannot mix except and except*
+        if (current().type == TokenType::EXCEPT && peek().type != TokenType::STAR) {
+            error("Cannot mix 'except' and 'except*' in the same try block");
+        }
+
+        if (!handlers.empty()) {
+            // Parse optional else block
+            orelse = parse_else_block();
+            // Parse optional finally block
+            if (current().type == TokenType::FINALLY) {
+                finalbody = parse_finally_block();
+            }
+        } else {
+            error("Expected 'except*' block after try");
+        }
+
+        return std::make_shared<ast::TryStar>(body, handlers, orelse, finalbody,
+                                              try_token.line, try_token.column);
     } else {
-        // No except blocks, try finally only (matches CPython: 'try' ':' block finally_block)
-        current_token_ = saved_pos;
-        if (current().type == TokenType::FINALLY) {
-            finalbody = parse_finally_block();
-        } else {
-            error("Expected 'except' or 'finally' block");
+        // Parse regular except blocks (Try)
+        while (current().type == TokenType::EXCEPT) {
+            // Validate: cannot mix except* with except
+            if (peek().type == TokenType::STAR) {
+                error("Cannot mix 'except' and 'except*' in the same try block");
+            }
+            auto handler = parse_except_block();
+            if (handler) {
+                handlers.push_back(handler);
+            } else {
+                break;
+            }
         }
-    }
 
-    return std::make_shared<ast::Try>(body, handlers, orelse, finalbody,
-                                      try_token.line, try_token.column);
+        if (!handlers.empty()) {
+            // We have except blocks, try else and finally
+            orelse = parse_else_block();
+            if (current().type == TokenType::FINALLY) {
+                finalbody = parse_finally_block();
+            }
+        } else {
+            // No except blocks, try finally only (matches CPython: 'try' ':' block finally_block)
+            current_token_ = saved_pos;
+            if (current().type == TokenType::FINALLY) {
+                finalbody = parse_finally_block();
+            } else {
+                error("Expected 'except' or 'finally' block");
+            }
+        }
+
+        return std::make_shared<ast::Try>(body, handlers, orelse, finalbody,
+                                          try_token.line, try_token.column);
+    }
 }
 
 // except_block: 'except' expression? 'as' NAME? ':' block
@@ -2245,6 +2287,72 @@ inline std::shared_ptr<ast::ExceptHandler> Parser::parse_except_block() {
     }
 
     // Parse except block body
+    std::vector<std::shared_ptr<ast::Stmt>> body;
+    while (!is_at_end() && current().type != TokenType::END_OF_FILE) {
+        if (current().type == TokenType::NEWLINE) {
+            advance();
+            continue;
+        }
+        // Stop at except, finally, else, def, class, or import statements
+        if (current().type == TokenType::EXCEPT || current().type == TokenType::FINALLY ||
+            current().type == TokenType::ELSE || current().type == TokenType::DEF ||
+            current().type == TokenType::CLASS || current().type == TokenType::IMPORT ||
+            current().type == TokenType::FROM) {
+            break;
+        }
+        auto stmt = parse_stmt();
+        if (stmt) {
+            body.push_back(stmt);
+        }
+    }
+
+    return std::make_shared<ast::ExceptHandler>(type, name, body,
+                                                 except_token.line, except_token.column);
+}
+
+// except_star_block: 'except' '*' expression ['as' NAME] ':' block
+// Python 3.11+ exception groups (PEP 654)
+// Note: Unlike regular except, except* REQUIRES an exception type
+inline std::shared_ptr<ast::ExceptHandler> Parser::parse_except_star_block() {
+    size_t saved_pos = current_token_;
+
+    if (!match(TokenType::EXCEPT)) {
+        current_token_ = saved_pos;
+        return nullptr;
+    }
+
+    Token except_token = tokens_[saved_pos];
+
+    // Consume the '*' token
+    if (!match(TokenType::STAR)) {
+        current_token_ = saved_pos;
+        return nullptr;
+    }
+
+    std::shared_ptr<ast::Expr> type = nullptr;
+    std::string name;
+
+    // Parse exception type (REQUIRED for except*)
+    // Unlike regular except, bare except* is not allowed
+    if (current().type == TokenType::COLON || current().type == TokenType::AS) {
+        error("except* requires an exception type");
+    }
+    type = parse_expr();
+
+    // Parse 'as name' (optional)
+    if (match(TokenType::AS)) {
+        if (current().type != TokenType::IDENTIFIER) {
+            error("Expected identifier after 'as'");
+        }
+        name = current().value;
+        advance();
+    }
+
+    if (!match(TokenType::COLON)) {
+        error("Expected ':' after except* clause");
+    }
+
+    // Parse except* block body
     std::vector<std::shared_ptr<ast::Stmt>> body;
     while (!is_at_end() && current().type != TokenType::END_OF_FILE) {
         if (current().type == TokenType::NEWLINE) {
