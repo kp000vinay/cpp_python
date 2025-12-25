@@ -629,6 +629,31 @@ private:
     std::vector<std::shared_ptr<Stmt>> finalbody_;
 };
 
+// TryStar statement - try/except* for exception groups (Python 3.11+, PEP 654)
+// Reference: Python.asdl - TryStar(stmt* body, excepthandler* handlers, stmt* orelse, stmt* finalbody)
+class TryStar : public ASTNodeBase {
+public:
+    TryStar(std::vector<std::shared_ptr<Stmt>> body,
+            std::vector<std::shared_ptr<ExceptHandler>> handlers,
+            std::vector<std::shared_ptr<Stmt>> orelse,
+            std::vector<std::shared_ptr<Stmt>> finalbody,
+            int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), body_(std::move(body)), handlers_(std::move(handlers)),
+          orelse_(std::move(orelse)), finalbody_(std::move(finalbody)) {}
+
+    const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
+    const std::vector<std::shared_ptr<ExceptHandler>>& handlers() const { return handlers_; }
+    const std::vector<std::shared_ptr<Stmt>>& orelse() const { return orelse_; }
+    const std::vector<std::shared_ptr<Stmt>>& finalbody() const { return finalbody_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::vector<std::shared_ptr<Stmt>> body_;
+    std::vector<std::shared_ptr<ExceptHandler>> handlers_;
+    std::vector<std::shared_ptr<Stmt>> orelse_;
+    std::vector<std::shared_ptr<Stmt>> finalbody_;
+};
+
 // Class definition
 class ClassDef : public ASTNodeBase {
 public:
@@ -974,6 +999,37 @@ inline std::string Try::to_string(int indent) const {
         }
         oss << indent_str(indent + 1) << "],\n";
     }
+    if (!orelse_.empty()) {
+        oss << indent_str(indent + 1) << "orelse=[\n";
+        for (const auto& stmt : orelse_) {
+            oss << stmt->to_string(indent + 2) << ",\n";
+        }
+        oss << indent_str(indent + 1) << "],\n";
+    }
+    if (!finalbody_.empty()) {
+        oss << indent_str(indent + 1) << "finalbody=[\n";
+        for (const auto& stmt : finalbody_) {
+            oss << stmt->to_string(indent + 2) << ",\n";
+        }
+        oss << indent_str(indent + 1) << "],\n";
+    }
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string TryStar::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "TryStar(\n";
+    oss << indent_str(indent + 1) << "body=[\n";
+    for (const auto& stmt : body_) {
+        oss << stmt->to_string(indent + 2) << ",\n";
+    }
+    oss << indent_str(indent + 1) << "],\n";
+    oss << indent_str(indent + 1) << "handlers=[\n";
+    for (const auto& handler : handlers_) {
+        oss << handler->to_string(indent + 2) << ",\n";
+    }
+    oss << indent_str(indent + 1) << "],\n";
     if (!orelse_.empty()) {
         oss << indent_str(indent + 1) << "orelse=[\n";
         for (const auto& stmt : orelse_) {

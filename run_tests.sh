@@ -76,6 +76,7 @@ declare -a CATEGORIES=(
     "tests/match_case"
     "tests/type_alias"
     "tests/starred_expressions"
+    "tests/except_star"
 )
 
 for category in "${CATEGORIES[@]}"; do
