@@ -71,6 +71,9 @@ declare -a CATEGORIES=(
     "tests/union_types"
     "tests/walrus_operator"
     "tests/type_annotations"
+    "tests/matrix_multiply"
+    "tests/positional_only"
+    "tests/match_case"
 )
 
 for category in "${CATEGORIES[@]}"; do
