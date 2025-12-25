@@ -150,6 +150,9 @@ private:
     std::shared_ptr<ast::Stmt> parse_async_for();           // Python 3.5+
     std::shared_ptr<ast::Stmt> parse_async_with();          // Python 3.5+
     std::shared_ptr<ast::Stmt> parse_match_stmt();          // Python 3.10+
+    std::shared_ptr<ast::Stmt> parse_type_alias();           // Python 3.12+
+    std::vector<std::shared_ptr<ast::TypeParam>> parse_type_params();  // Python 3.12+
+    std::shared_ptr<ast::TypeParam> parse_type_param();      // Python 3.12+
     std::shared_ptr<ast::Stmt> parse_break();
     std::shared_ptr<ast::Stmt> parse_continue();
     std::shared_ptr<ast::Stmt> parse_expr_stmt();
@@ -444,6 +447,8 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_stmt() {
         return parse_for();
     } else if (current().type == TokenType::MATCH) {
         return parse_match_stmt();
+    } else if (current().type == TokenType::TYPE) {
+        return parse_type_alias();
     } else if (current().type == TokenType::TRY) {
         return parse_try_stmt();
     } else if (current().type == TokenType::BREAK) {
@@ -3177,10 +3182,192 @@ inline std::vector<std::shared_ptr<ast::Expr>> Parser::parse_decorators() {
 }
 
 
+// ============================================================================
+// Type Alias Parsing (Python 3.12+ PEP 695)
+// ============================================================================
+
+/**
+ * Parse a type alias statement
+ * Grammar: type_alias: "type" NAME [type_params] '=' expression
+ * 
+ * Examples:
+ *   type Point = tuple[float, float]
+ *   type Vector[T] = list[T]
+ */
+inline std::shared_ptr<ast::Stmt> Parser::parse_type_alias() {
+    std::cerr << "[DEBUG parse_type_alias] Entry" << std::endl;
+    std::cerr.flush();
+    
+    Token start_token = current();
+    advance(); // consume 'type'
+    
+    // Parse the alias name
+    if (current().type != TokenType::IDENTIFIER) {
+        error("Expected identifier after 'type'");
+    }
+    
+    std::string name = current().value;
+    auto name_expr = std::make_shared<ast::Name>(
+        name, ast::ExprContext::Store, current().line, current().column
+    );
+    advance(); // consume name
+    
+    // Parse optional type parameters [T], [T, U], [T: int], [*Ts], [**P]
+    std::vector<std::shared_ptr<ast::TypeParam>> type_params;
+    if (current().type == TokenType::LBRACKET) {
+        type_params = parse_type_params();
+    }
+    
+    // Expect '='
+    if (current().type != TokenType::EQUAL) {
+        error("Expected '=' in type alias");
+    }
+    advance(); // consume '='
+    
+    // Parse the type expression
+    auto value = parse_expr();
+    
+    // Consume optional newline
+    if (current().type == TokenType::NEWLINE) {
+        advance();
+    }
+    
+    std::cerr << "[DEBUG parse_type_alias] Created TypeAlias: " << name << std::endl;
+    std::cerr.flush();
+    
+    return std::make_shared<ast::TypeAlias>(
+        name_expr, type_params, value,
+        start_token.line, start_token.column
+    );
+}
+
+/**
+ * Parse type parameters list
+ * Grammar: type_params: '[' type_param (',' type_param)* ']'
+ */
+inline std::vector<std::shared_ptr<ast::TypeParam>> Parser::parse_type_params() {
+    std::cerr << "[DEBUG parse_type_params] Entry" << std::endl;
+    std::cerr.flush();
+    
+    std::vector<std::shared_ptr<ast::TypeParam>> params;
+    
+    if (current().type != TokenType::LBRACKET) {
+        return params; // No type params
+    }
+    advance(); // consume '['
+    
+    // Parse first type param
+    params.push_back(parse_type_param());
+    
+    // Parse remaining type params
+    while (current().type == TokenType::COMMA) {
+        advance(); // consume ','
+        if (current().type == TokenType::RBRACKET) {
+            break; // Trailing comma
+        }
+        params.push_back(parse_type_param());
+    }
+    
+    if (current().type != TokenType::RBRACKET) {
+        error("Expected ']' after type parameters");
+    }
+    advance(); // consume ']'
+    
+    std::cerr << "[DEBUG parse_type_params] Parsed " << params.size() << " type params" << std::endl;
+    std::cerr.flush();
+    
+    return params;
+}
+
+/**
+ * Parse a single type parameter
+ * Grammar:
+ *   type_param: NAME [':' expression] ['=' expression]  # TypeVar
+ *            | '*' NAME ['=' expression]                 # TypeVarTuple
+ *            | '**' NAME ['=' expression]                # ParamSpec
+ */
+inline std::shared_ptr<ast::TypeParam> Parser::parse_type_param() {
+    std::cerr << "[DEBUG parse_type_param] Entry, token=" << current().value << std::endl;
+    std::cerr.flush();
+    
+    Token start_token = current();
+    
+    // Check for TypeVarTuple (*Ts)
+    if (current().type == TokenType::STAR) {
+        advance(); // consume '*'
+        
+        if (current().type != TokenType::IDENTIFIER) {
+            error("Expected identifier after '*' in type parameter");
+        }
+        
+        std::string name = current().value;
+        advance(); // consume name
+        
+        // Check for optional default value
+        std::shared_ptr<ast::Expr> default_value = nullptr;
+        if (current().type == TokenType::EQUAL) {
+            advance(); // consume '='
+            default_value = parse_expr();
+        }
+        
+        return std::make_shared<ast::TypeVarTuple>(
+            name, default_value, start_token.line, start_token.column
+        );
+    }
+    
+    // Check for ParamSpec (**P)
+    if (current().type == TokenType::POWER) {
+        advance(); // consume '**'
+        
+        if (current().type != TokenType::IDENTIFIER) {
+            error("Expected identifier after '**' in type parameter");
+        }
+        
+        std::string name = current().value;
+        advance(); // consume name
+        
+        // Check for optional default value
+        std::shared_ptr<ast::Expr> default_value = nullptr;
+        if (current().type == TokenType::EQUAL) {
+            advance(); // consume '='
+            default_value = parse_expr();
+        }
+        
+        return std::make_shared<ast::ParamSpec>(
+            name, default_value, start_token.line, start_token.column
+        );
+    }
+    
+    // TypeVar (T, T: int, T = int)
+    if (current().type != TokenType::IDENTIFIER) {
+        error("Expected identifier in type parameter");
+    }
+    
+    std::string name = current().value;
+    advance(); // consume name
+    
+    // Check for optional bound (T: int)
+    std::shared_ptr<ast::Expr> bound = nullptr;
+    if (current().type == TokenType::COLON) {
+        advance(); // consume ':'
+        bound = parse_expr();
+    }
+    
+    // Check for optional default value (T = int)
+    std::shared_ptr<ast::Expr> default_value = nullptr;
+    if (current().type == TokenType::EQUAL) {
+        advance(); // consume '='
+        default_value = parse_expr();
+    }
+    
+    return std::make_shared<ast::TypeVar>(
+        name, bound, default_value, start_token.line, start_token.column
+    );
+}
+
 } // namespace parser
 } // namespace cpython_cpp
-
-#endif // CPYTHON_CPP_PARSER_HPP
+#endif // CPYTHON_CPP_PARSER_HPPP
 
 
 
