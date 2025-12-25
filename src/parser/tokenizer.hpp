@@ -29,13 +29,20 @@ enum class TokenType {
     DEF, IF, ELIF, ELSE, FOR, WHILE, RETURN, CLASS, IMPORT, FROM, AS,
     AND, OR, NOT, IN, IS, TRY, EXCEPT, FINALLY, RAISE, WITH, PASS,
     BREAK, CONTINUE, LAMBDA, DEL, ASSERT, GLOBAL, NONLOCAL, YIELD,
+    ASYNC, AWAIT,  // Python 3.5+ async/await keywords
 
     // Operators
     PLUS, MINUS, STAR, SLASH, PERCENT, POWER, FLOOR_DIV, EQUAL,
     LPAREN, RPAREN, LBRACKET, RBRACKET, LBRACE, RBRACE,
-    COLON, COMMA, SEMICOLON, DOT,
+    COLON, COMMA, SEMICOLON, DOT, WALRUS,  // := operator (Python 3.8+)
+    ARROW,  // -> operator for return annotations (Python 3.5+)
     GREATER, LESS, GREATER_EQUAL, LESS_EQUAL, EQUAL_EQUAL, NOT_EQUAL,
     BIT_OR, BIT_AND, BIT_XOR, BIT_NOT, LEFT_SHIFT, RIGHT_SHIFT,
+
+    // Augmented assignment operators
+    PLUSEQUAL, MINEQUAL, STAREQUAL, SLASHEQUAL, PERCENTEQUAL,
+    DOUBLESTAREQUAL, DOUBLESLASHEQUAL, AMPEREQUAL, VBAREQUAL,
+    CIRCUMFLEXEQUAL, LEFTSHIFTEQUAL, RIGHTSHIFTEQUAL,
 
     // Literals
     NUMBER, STRING, IDENTIFIER, TRUE, FALSE, NONE,
@@ -203,6 +210,8 @@ namespace {
         {"continue", TokenType::CONTINUE},
         {"lambda", TokenType::LAMBDA},
         {"yield", TokenType::YIELD},
+        {"async", TokenType::ASYNC},  // Python 3.5+
+        {"await", TokenType::AWAIT},  // Python 3.5+
         {"True", TokenType::TRUE},
         {"False", TokenType::FALSE},
         {"None", TokenType::NONE},
@@ -772,26 +781,63 @@ inline Token Tokenizer::next_token() {
     switch (c) {
         case '+':
             position_++; column_++;
+            if (position_ < source_.length() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::PLUSEQUAL, "+=", line_, start_col);
+            }
             return Token(TokenType::PLUS, "+", line_, start_col);
         case '-':
             position_++; column_++;
+            if (position_ < source_.length() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::MINEQUAL, "-=", line_, start_col);
+            }
+            // Check for arrow operator ->
+            if (position_ < source_.length() && source_[position_] == '>') {
+                position_++; column_++;
+                return Token(TokenType::ARROW, "->", line_, start_col);
+            }
             return Token(TokenType::MINUS, "-", line_, start_col);
         case '*':
             position_++; column_++;
             if (position_ < source_.length() && source_[position_] == '*') {
                 position_++; column_++;
+                // Check for **=
+                if (position_ < source_.length() && source_[position_] == '=') {
+                    position_++; column_++;
+                    return Token(TokenType::DOUBLESTAREQUAL, "**=", line_, start_col);
+                }
                 return Token(TokenType::POWER, "**", line_, start_col);
+            }
+            // Check for *=
+            if (position_ < source_.length() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::STAREQUAL, "*=", line_, start_col);
             }
             return Token(TokenType::STAR, "*", line_, start_col);
         case '/':
             position_++; column_++;
             if (position_ < source_.length() && source_[position_] == '/') {
                 position_++; column_++;
+                // Check for //=
+                if (position_ < source_.length() && source_[position_] == '=') {
+                    position_++; column_++;
+                    return Token(TokenType::DOUBLESLASHEQUAL, "//=", line_, start_col);
+                }
                 return Token(TokenType::FLOOR_DIV, "//", line_, start_col);
+            }
+            // Check for /=
+            if (position_ < source_.length() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::SLASHEQUAL, "/=", line_, start_col);
             }
             return Token(TokenType::SLASH, "/", line_, start_col);
         case '%':
             position_++; column_++;
+            if (position_ < source_.length() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::PERCENTEQUAL, "%=", line_, start_col);
+            }
             return Token(TokenType::PERCENT, "%", line_, start_col);
         case '=':
             position_++; column_++;
@@ -807,6 +853,11 @@ inline Token Tokenizer::next_token() {
                 return Token(TokenType::GREATER_EQUAL, ">=", line_, start_col);
             } else if (position_ < source_.length() && source_[position_] == '>') {
                 position_++; column_++;
+                // Check for >>=
+                if (position_ < source_.length() && source_[position_] == '=') {
+                    position_++; column_++;
+                    return Token(TokenType::RIGHTSHIFTEQUAL, ">>=", line_, start_col);
+                }
                 return Token(TokenType::RIGHT_SHIFT, ">>", line_, start_col);
             }
             return Token(TokenType::GREATER, ">", line_, start_col);
@@ -817,6 +868,11 @@ inline Token Tokenizer::next_token() {
                 return Token(TokenType::LESS_EQUAL, "<=", line_, start_col);
             } else if (position_ < source_.length() && source_[position_] == '<') {
                 position_++; column_++;
+                // Check for <<=
+                if (position_ < source_.length() && source_[position_] == '=') {
+                    position_++; column_++;
+                    return Token(TokenType::LEFTSHIFTEQUAL, "<<=", line_, start_col);
+                }
                 return Token(TokenType::LEFT_SHIFT, "<<", line_, start_col);
             }
             return Token(TokenType::LESS, "<", line_, start_col);
@@ -835,12 +891,24 @@ inline Token Tokenizer::next_token() {
             return Token(TokenType::NOT, "!", line_, start_col);
         case '|':
             position_++; column_++;
+            if (position_ < source_.length() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::VBAREQUAL, "|=", line_, start_col);
+            }
             return Token(TokenType::BIT_OR, "|", line_, start_col);
         case '&':
             position_++; column_++;
+            if (position_ < source_.length() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::AMPEREQUAL, "&=", line_, start_col);
+            }
             return Token(TokenType::BIT_AND, "&", line_, start_col);
         case '^':
             position_++; column_++;
+            if (position_ < source_.length() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::CIRCUMFLEXEQUAL, "^=", line_, start_col);
+            }
             return Token(TokenType::BIT_XOR, "^", line_, start_col);
         case '~':
             position_++; column_++;
@@ -865,6 +933,11 @@ inline Token Tokenizer::next_token() {
             return Token(TokenType::RBRACE, "}", line_, start_col);
         case ':':
             position_++; column_++;
+            // Check for walrus operator :=
+            if (position_ < source_.size() && source_[position_] == '=') {
+                position_++; column_++;
+                return Token(TokenType::WALRUS, ":=", line_, start_col);
+            }
             return Token(TokenType::COLON, ":", line_, start_col);
         case ',':
             position_++; column_++;
