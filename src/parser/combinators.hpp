@@ -28,7 +28,7 @@ template<typename T>
 class ParseResult;
 
 template<typename T>
-class Parser;
+class ParserBase;
 
 // Parse result - either success with value or failure
 template<typename T>
@@ -74,20 +74,20 @@ concept ParserConcept = requires(P p, Input& input) {
     { p.parse(input) };
 };
 
-// Base parser class template
+// Base parser class template for combinators
 template<typename T>
-class Parser {
+class ParserBase {
 public:
     using value_type = T;
     using result_type = ParseResult<T>;
     
-    virtual ~Parser() = default;
+    virtual ~ParserBase() = default;
     virtual result_type parse(std::vector<Token>& tokens, size_t& pos) const = 0;
 };
 
 // Token matcher parser - matches a specific token type
 template<TokenType Type>
-class TokenParser : public Parser<TypedToken<Type>> {
+class TokenParser : public ParserBase<TypedToken<Type>> {
 public:
     using result_type = ParseResult<TypedToken<Type>>;
     
@@ -107,7 +107,7 @@ public:
 
 // Sequence combinator - parse A then B
 template<typename P1, typename P2>
-class SequenceParser : public Parser<std::pair<typename P1::value_type, typename P2::value_type>> {
+class SequenceParser : public ParserBase<std::pair<typename P1::value_type, typename P2::value_type>> {
 public:
     using T1 = typename P1::value_type;
     using T2 = typename P2::value_type;
@@ -143,7 +143,7 @@ private:
 
 // Choice combinator - parse A or B
 template<typename P1, typename P2>
-class ChoiceParser : public Parser<std::variant<typename P1::value_type, typename P2::value_type>> {
+class ChoiceParser : public ParserBase<std::variant<typename P1::value_type, typename P2::value_type>> {
 public:
     using T1 = typename P1::value_type;
     using T2 = typename P2::value_type;
@@ -176,7 +176,7 @@ private:
 
 // Many combinator - parse zero or more
 template<typename P>
-class ManyParser : public Parser<std::vector<typename P::value_type>> {
+class ManyParser : public ParserBase<std::vector<typename P::value_type>> {
 public:
     using T = typename P::value_type;
     using result_type = ParseResult<std::vector<T>>;
@@ -209,7 +209,7 @@ private:
 
 // Optional combinator - parse zero or one
 template<typename P>
-class OptionalParser : public Parser<std::optional<typename P::value_type>> {
+class OptionalParser : public ParserBase<std::optional<typename P::value_type>> {
 public:
     using T = typename P::value_type;
     using result_type = ParseResult<std::optional<T>>;
