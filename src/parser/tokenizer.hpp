@@ -30,6 +30,7 @@ enum class TokenType {
     AND, OR, NOT, IN, IS, TRY, EXCEPT, FINALLY, RAISE, WITH, PASS,
     BREAK, CONTINUE, LAMBDA, DEL, ASSERT, GLOBAL, NONLOCAL, YIELD,
     ASYNC, AWAIT,  // Python 3.5+ async/await keywords
+    MATCH, CASE,   // Python 3.10+ pattern matching keywords
 
     // Operators
     PLUS, MINUS, STAR, SLASH, PERCENT, POWER, FLOOR_DIV, EQUAL,
@@ -212,6 +213,8 @@ namespace {
         {"yield", TokenType::YIELD},
         {"async", TokenType::ASYNC},  // Python 3.5+
         {"await", TokenType::AWAIT},  // Python 3.5+
+        {"match", TokenType::MATCH},  // Python 3.10+
+        {"case", TokenType::CASE},    // Python 3.10+
         {"True", TokenType::TRUE},
         {"False", TokenType::FALSE},
         {"None", TokenType::NONE},

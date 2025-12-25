@@ -61,6 +61,7 @@ private:
     std::shared_ptr<ast::Stmt> parse_async_function_def();  // Python 3.5+
     std::shared_ptr<ast::Stmt> parse_async_for();           // Python 3.5+
     std::shared_ptr<ast::Stmt> parse_async_with();          // Python 3.5+
+    std::shared_ptr<ast::Stmt> parse_match_stmt();          // Python 3.10+
     std::shared_ptr<ast::Stmt> parse_break();
     std::shared_ptr<ast::Stmt> parse_continue();
     std::shared_ptr<ast::Stmt> parse_expr_stmt();
@@ -353,6 +354,8 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_stmt() {
         return parse_while();
     } else if (current().type == TokenType::FOR) {
         return parse_for();
+    } else if (current().type == TokenType::MATCH) {
+        return parse_match_stmt();
     } else if (current().type == TokenType::TRY) {
         return parse_try_stmt();
     } else if (current().type == TokenType::BREAK) {
@@ -739,6 +742,78 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_for() {
 
     return std::make_shared<ast::For>(target, iter, body, orelse, for_token.line, for_token.column);
 }
+
+// Parse match statement (Python 3.10+)
+// Simplified implementation: match subject: case pattern: body
+inline std::shared_ptr<ast::Stmt> Parser::parse_match_stmt() {
+    Token match_token = current();
+    if (!match(TokenType::MATCH)) {
+        error("Expected 'match'");
+    }
+
+    // Parse subject expression
+    auto subject = parse_expr();
+
+    if (!match(TokenType::COLON)) {
+        error("Expected ':' after match subject");
+    }
+
+    // Parse case blocks
+    std::vector<ast::match_case> cases;
+    
+    while (!is_at_end() && current().type != TokenType::END_OF_FILE) {
+        if (current().type == TokenType::NEWLINE) {
+            advance();
+            continue;
+        }
+        
+        // Stop if we hit a non-case statement
+        if (current().type != TokenType::CASE) {
+            break;
+        }
+        
+        // Parse case block
+        advance();  // consume 'case'
+        
+        // Parse pattern (simplified - just parse as expression)
+        auto pattern = parse_expr();
+        
+        // Check for guard (if clause)
+        std::shared_ptr<ast::Expr> guard = nullptr;
+        if (current().type == TokenType::IF) {
+            advance();  // consume 'if'
+            guard = parse_expr();
+        }
+        
+        if (!match(TokenType::COLON)) {
+            error("Expected ':' after case pattern");
+        }
+        
+        // Parse case body
+        std::vector<std::shared_ptr<ast::Stmt>> body;
+        while (!is_at_end() && current().type != TokenType::END_OF_FILE) {
+            if (current().type == TokenType::NEWLINE) {
+                advance();
+                continue;
+            }
+            // Stop at next case or end of match
+            if (current().type == TokenType::CASE || 
+                current().type == TokenType::DEF ||
+                current().type == TokenType::CLASS) {
+                break;
+            }
+            auto stmt = parse_stmt();
+            if (stmt) {
+                body.push_back(stmt);
+            }
+        }
+        
+        cases.push_back(ast::match_case(pattern, guard, body));
+    }
+
+    return std::make_shared<ast::Match>(subject, cases, match_token.line, match_token.column);
+}
+
 
 // Parse async function definition (Python 3.5+)
 inline std::shared_ptr<ast::Stmt> Parser::parse_async_function_def() {
@@ -1135,12 +1210,14 @@ inline std::shared_ptr<ast::Expr> Parser::parse_term() {
         ast::Operator op;
         if (match(TokenType::STAR)) {
             op = ast::Operator::Mult;
+        } else if (match(TokenType::AT)) {
+            op = ast::Operator::MatMult;
         } else if (match(TokenType::SLASH)) {
             op = ast::Operator::Div;
         } else if (match(TokenType::PERCENT)) {
             op = ast::Operator::Mod;
         } else if (match(TokenType::FLOOR_DIV)) {
-            op = ast::Operator::Div; // TODO: Add FloorDiv operator
+            op = ast::Operator::FloorDiv;
         } else {
             break;
         }
@@ -1695,6 +1772,21 @@ inline std::vector<ast::arg> Parser::parse_arg_list() {
     }
 
     while (true) {
+        // Check for positional-only marker '/'
+        if (current().type == TokenType::SLASH) {
+            advance();  // consume '/'
+            // Skip comma after / if present
+            if (current().type == TokenType::COMMA) {
+                advance();
+            }
+            // If we hit ), we're done
+            if (current().type == TokenType::RPAREN) {
+                break;
+            }
+            // Continue parsing remaining args
+            continue;
+        }
+        
         if (current().type != TokenType::IDENTIFIER) {
             error("Expected argument name");
         }

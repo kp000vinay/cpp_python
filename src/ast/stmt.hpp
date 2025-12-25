@@ -744,6 +744,44 @@ private:
     std::vector<std::shared_ptr<Stmt>> body_;
 };
 
+// Match/Case Pattern Matching (Python 3.10+)
+// Simplified implementation for basic pattern matching
+
+// match_case represents a single case block in a match statement
+class match_case {
+public:
+    match_case(std::shared_ptr<Expr> pattern,
+               std::shared_ptr<Expr> guard,
+               std::vector<std::shared_ptr<Stmt>> body)
+        : pattern_(pattern), guard_(guard), body_(body) {}
+    
+    std::shared_ptr<Expr> pattern() const { return pattern_; }
+    std::shared_ptr<Expr> guard() const { return guard_; }
+    const std::vector<std::shared_ptr<Stmt>>& body() const { return body_; }
+    
+private:
+    std::shared_ptr<Expr> pattern_;  // Pattern to match (simplified as Expr)
+    std::shared_ptr<Expr> guard_;    // Optional guard condition (if clause)
+    std::vector<std::shared_ptr<Stmt>> body_;  // Statements to execute if matched
+};
+
+// Match statement
+class Match : public ASTNodeBase {
+public:
+    Match(std::shared_ptr<Expr> subject,
+          std::vector<match_case> cases,
+          int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), subject_(subject), cases_(cases) {}
+    
+    std::shared_ptr<Expr> subject() const { return subject_; }
+    const std::vector<match_case>& cases() const { return cases_; }
+    std::string to_string(int indent = 0) const override;
+    
+private:
+    std::shared_ptr<Expr> subject_;  // Expression to match against
+    std::vector<match_case> cases_;  // List of case blocks
+};
+
 // Implementations
 inline std::string ExceptHandler::to_string(int indent) const {
     std::ostringstream oss;
@@ -957,6 +995,7 @@ inline std::string Delete::to_string(int indent) const {
 
 inline std::string Assert::to_string(int indent) const {
     std::ostringstream oss;
+
     oss << indent_str(indent) << "Assert(\n";
     oss << indent_str(indent + 1) << "test=\n";
     oss << test_->to_string(indent + 2) << ",\n";
@@ -992,6 +1031,34 @@ inline std::string Nonlocal::to_string(int indent) const {
         if (i < names_.size() - 1) oss << ", ";
     }
     oss << "]\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+
+// Match statement implementation
+inline std::string Match::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "Match(\n";
+    oss << indent_str(indent + 1) << "subject=\n";
+    oss << subject_->to_string(indent + 2) << ",\n";
+    oss << indent_str(indent + 1) << "cases=[\n";
+    for (const auto& case_block : cases_) {
+        oss << indent_str(indent + 2) << "match_case(\n";
+        oss << indent_str(indent + 3) << "pattern=\n";
+        oss << case_block.pattern()->to_string(indent + 4) << ",\n";
+        if (case_block.guard()) {
+            oss << indent_str(indent + 3) << "guard=\n";
+            oss << case_block.guard()->to_string(indent + 4) << ",\n";
+        }
+        oss << indent_str(indent + 3) << "body=[\n";
+        for (const auto& stmt : case_block.body()) {
+            oss << stmt->to_string(indent + 4) << ",\n";
+        }
+        oss << indent_str(indent + 3) << "]\n";
+        oss << indent_str(indent + 2) << "),\n";
+    }
+    oss << indent_str(indent + 1) << "]\n";
     oss << indent_str(indent) << ")";
     return oss.str();
 }

@@ -136,7 +136,7 @@ enum class ExprContext {
 
 // Template-based operators with compile-time properties
 enum class Operator {
-    Add, Sub, Mult, Div, Mod, Pow, FloorDiv,
+    Add, Sub, Mult, MatMult, Div, Mod, Pow, FloorDiv,
     BitOr, BitAnd, BitXor, LShift, RShift
 };
 
@@ -146,6 +146,7 @@ constexpr const char* operator_name() {
     if constexpr (Op == Operator::Add) return "+";
     else if constexpr (Op == Operator::Sub) return "-";
     else if constexpr (Op == Operator::Mult) return "*";
+    else if constexpr (Op == Operator::MatMult) return "@";
     else if constexpr (Op == Operator::Div) return "/";
     else if constexpr (Op == Operator::Mod) return "%";
     else if constexpr (Op == Operator::Pow) return "**";
@@ -164,6 +165,7 @@ inline const char* operator_to_string(Operator op) {
         case Operator::Add: return "+";
         case Operator::Sub: return "-";
         case Operator::Mult: return "*";
+        case Operator::MatMult: return "@";
         case Operator::Div: return "/";
         case Operator::Mod: return "%";
         case Operator::Pow: return "**";
