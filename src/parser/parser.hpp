@@ -42,12 +42,6 @@ private:
     // Parsing methods (recursive descent)
     std::shared_ptr<ast::Module> parse_module();
     std::shared_ptr<ast::Stmt> parse_stmt();
-    
-    // Helper to check if current token is an augmented assignment operator
-    bool is_augmented_assign() const;
-    
-    // Helper to convert augmented assignment token to Operator
-    ast::Operator token_to_operator(TokenType type) const;
     std::shared_ptr<ast::Stmt> parse_function_def();
     std::shared_ptr<ast::Stmt> parse_function_def_raw();
     std::vector<std::shared_ptr<ast::Expr>> parse_decorators();
@@ -58,9 +52,6 @@ private:
     std::vector<std::shared_ptr<ast::Stmt>> parse_else_block();
     std::shared_ptr<ast::Stmt> parse_while();
     std::shared_ptr<ast::Stmt> parse_for();
-    std::shared_ptr<ast::Stmt> parse_async_function_def();  // Python 3.5+
-    std::shared_ptr<ast::Stmt> parse_async_for();           // Python 3.5+
-    std::shared_ptr<ast::Stmt> parse_async_with();          // Python 3.5+
     std::shared_ptr<ast::Stmt> parse_break();
     std::shared_ptr<ast::Stmt> parse_continue();
     std::shared_ptr<ast::Stmt> parse_expr_stmt();
@@ -98,7 +89,7 @@ private:
     std::shared_ptr<ast::Expr> parse_star_expression();
 
     // Helper for parsing argument lists
-    std::vector<ast::arg> parse_arg_list();
+    std::vector<std::string> parse_arg_list();
     std::vector<std::shared_ptr<ast::Expr>> parse_expr_list();
 
     // CPython-style arguments parsing (matches arguments_rule and args_rule)
@@ -202,42 +193,6 @@ inline bool Parser::is_at_end() const {
     return current().type == TokenType::END_OF_FILE;
 }
 
-inline bool Parser::is_augmented_assign() const {
-    TokenType type = current().type;
-    return type == TokenType::PLUSEQUAL ||
-           type == TokenType::MINEQUAL ||
-           type == TokenType::STAREQUAL ||
-           type == TokenType::SLASHEQUAL ||
-           type == TokenType::PERCENTEQUAL ||
-           type == TokenType::DOUBLESTAREQUAL ||
-           type == TokenType::DOUBLESLASHEQUAL ||
-           type == TokenType::AMPEREQUAL ||
-           type == TokenType::VBAREQUAL ||
-           type == TokenType::CIRCUMFLEXEQUAL ||
-           type == TokenType::LEFTSHIFTEQUAL ||
-           type == TokenType::RIGHTSHIFTEQUAL;
-}
-
-inline ast::Operator Parser::token_to_operator(TokenType type) const {
-    switch (type) {
-        case TokenType::PLUSEQUAL: return ast::Operator::Add;
-        case TokenType::MINEQUAL: return ast::Operator::Sub;
-        case TokenType::STAREQUAL: return ast::Operator::Mult;
-        case TokenType::SLASHEQUAL: return ast::Operator::Div;
-        case TokenType::PERCENTEQUAL: return ast::Operator::Mod;
-        case TokenType::DOUBLESTAREQUAL: return ast::Operator::Pow;
-        case TokenType::DOUBLESLASHEQUAL: return ast::Operator::FloorDiv;
-        case TokenType::AMPEREQUAL: return ast::Operator::BitAnd;
-        case TokenType::VBAREQUAL: return ast::Operator::BitOr;
-        case TokenType::CIRCUMFLEXEQUAL: return ast::Operator::BitXor;
-        case TokenType::LEFTSHIFTEQUAL: return ast::Operator::LShift;
-        case TokenType::RIGHTSHIFTEQUAL: return ast::Operator::RShift;
-        default:
-            throw std::runtime_error("Invalid augmented assignment operator");
-            return ast::Operator::Add; // Never reached
-    }
-}
-
 inline void Parser::error(const std::string& message) {
     std::ostringstream oss;
     oss << "Parse error at line " << current().line
@@ -324,19 +279,6 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_stmt() {
             error("Decorators can only be applied to functions or classes");
         }
     }
-    // Handle async keyword (Python 3.5+)
-    if (current().type == TokenType::ASYNC) {
-        advance(); // consume 'async'
-        if (current().type == TokenType::DEF) {
-            return parse_async_function_def();
-        } else if (current().type == TokenType::FOR) {
-            return parse_async_for();
-        } else if (current().type == TokenType::WITH) {
-            return parse_async_with();
-        } else {
-            error("'async' must be followed by 'def', 'for', or 'with'");
-        }
-    }
     if (current().type == TokenType::DEF) {
         return parse_function_def();
     } else if (current().type == TokenType::CLASS) {
@@ -381,49 +323,8 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_stmt() {
                   << ", type=" << static_cast<int>(current().type) << std::endl;
         std::cerr.flush();
         auto expr = parse_expr();
-        
-        // Check for annotated assignment: x: int = 5 or y: str
-        if (current().type == TokenType::COLON) {
-            // This is an annotated assignment
-            advance(); // consume ':'
-            
-            // Parse the annotation
-            auto annotation = parse_expr();
-            
-            // Check if target is a simple name
-            auto name_expr = std::dynamic_pointer_cast<ast::Name>(expr);
-            bool simple = (name_expr != nullptr);
-            
-            // Change target context to Store
-            if (simple) {
-                expr = std::make_shared<ast::Name>(
-                    name_expr->id(),
-                    ast::ExprContext::Store,
-                    name_expr->lineno(),
-                    name_expr->col_offset()
-                );
-            }
-            
-            // Check for optional value: x: int = 5
-            std::shared_ptr<ast::Expr> value = nullptr;
-            if (match(TokenType::EQUAL)) {
-                value = parse_expr();
-            }
-            
-            return std::make_shared<ast::AnnAssign>(
-                expr, annotation, value, simple,
-                expr->lineno(), expr->col_offset()
-            );
-        } else if (is_augmented_assign()) {
-            // This is an augmented assignment (+=, -=, etc.)
-            TokenType op_token = current().type;
-            ast::Operator op = token_to_operator(op_token);
-            advance(); // consume the augmented assignment operator
-            auto value = parse_expr();
-            return std::make_shared<ast::AugAssign>(expr, op, value,
-                                                    expr->lineno(), expr->col_offset());
-        } else if (match(TokenType::EQUAL)) {
-            // This is a regular assignment
+        if (match(TokenType::EQUAL)) {
+            // This is an assignment
             auto value = parse_expr();
             std::vector<std::shared_ptr<ast::Expr>> targets = {expr};
             return std::make_shared<ast::Assign>(targets, value,
@@ -455,7 +356,6 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_function_def() {
     if (auto func = std::dynamic_pointer_cast<ast::FunctionDef>(func_def)) {
         return std::make_shared<ast::FunctionDef>(
             func->name(), func->args(), func->body(), decorators,
-            func->returns(),  // preserve returns annotation
             func->lineno(), func->col_offset());
     }
     return func_def;
@@ -477,17 +377,10 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_function_def_raw() {
         error("Expected '(' after function name");
     }
 
-    std::vector<ast::arg> args = parse_arg_list();
+    std::vector<std::string> args = parse_arg_list();
 
     if (!match(TokenType::RPAREN)) {
         error("Expected ')' after arguments");
-    }
-
-    // Check for return annotation: -> type
-    std::shared_ptr<ast::Expr> returns = nullptr;
-    if (current().type == TokenType::ARROW) {
-        advance();  // consume '->'
-        returns = parse_expr();
     }
 
     if (!match(TokenType::COLON)) {
@@ -513,7 +406,6 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_function_def_raw() {
     }
 
     return std::make_shared<ast::FunctionDef>(name, args, body, std::vector<std::shared_ptr<ast::Expr>>(),
-                                             returns,  // return annotation
                                              name_token.line, name_token.column);
 }
 
@@ -736,103 +628,6 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_for() {
     return std::make_shared<ast::For>(target, iter, body, orelse, for_token.line, for_token.column);
 }
 
-// Parse async function definition (Python 3.5+)
-inline std::shared_ptr<ast::Stmt> Parser::parse_async_function_def() {
-    Token async_token = tokens_[current_token_ - 1]; // 'async' was already consumed
-    if (!match(TokenType::DEF)) {
-        error("Expected 'def' after 'async'");
-    }
-
-    Token name_token = current();
-    if (name_token.type != TokenType::IDENTIFIER) {
-        error("Expected function name");
-    }
-    std::string name = name_token.value;
-    advance();
-
-    if (!match(TokenType::LPAREN)) {
-        error("Expected '(' after function name");
-    }
-
-    std::vector<ast::arg> args = parse_arg_list();
-
-    if (!match(TokenType::RPAREN)) {
-        error("Expected ')' after arguments");
-    }
-
-    // Check for return annotation: -> type
-    std::shared_ptr<ast::Expr> returns = nullptr;
-    if (current().type == TokenType::ARROW) {
-        advance();  // consume '->'
-        returns = parse_expr();
-    }
-
-    if (!match(TokenType::COLON)) {
-        error("Expected ':' after function signature");
-    }
-
-    // Parse function body
-    std::vector<std::shared_ptr<ast::Stmt>> body;
-    while (!is_at_end() && current().type != TokenType::END_OF_FILE) {
-        if (current().type == TokenType::NEWLINE) {
-            advance();
-            continue;
-        }
-        if (current().type == TokenType::DEF && peek().type == TokenType::IDENTIFIER) {
-            break;
-        }
-        auto stmt = parse_stmt();
-        if (stmt) {
-            body.push_back(stmt);
-        }
-    }
-
-    return std::make_shared<ast::AsyncFunctionDef>(name, args, body, std::vector<std::shared_ptr<ast::Expr>>(),
-                                                    returns,  // return annotation
-                                                    async_token.line, async_token.column);
-}
-
-// Parse async for loop (Python 3.5+)
-inline std::shared_ptr<ast::Stmt> Parser::parse_async_for() {
-    Token async_token = tokens_[current_token_ - 1]; // 'async' was already consumed
-    if (!match(TokenType::FOR)) {
-        error("Expected 'for' after 'async'");
-    }
-
-    auto target = parse_star_targets();
-
-    if (!match(TokenType::IN)) {
-        error("Expected 'in' in async for loop");
-    }
-
-    auto iter = parse_star_expressions();
-
-    if (!match(TokenType::COLON)) {
-        error("Expected ':' after async for loop");
-    }
-
-    // Parse block (body)
-    std::vector<std::shared_ptr<ast::Stmt>> body;
-    while (!is_at_end() && current().type != TokenType::END_OF_FILE) {
-        if (current().type == TokenType::NEWLINE) {
-            advance();
-            continue;
-        }
-        if (current().type == TokenType::ELSE || current().type == TokenType::DEF) {
-            break;
-        }
-        auto stmt = parse_stmt();
-        if (stmt) {
-            body.push_back(stmt);
-        }
-    }
-
-    // Parse else clause if present
-    std::vector<std::shared_ptr<ast::Stmt>> orelse = parse_else_block();
-
-    return std::make_shared<ast::AsyncFor>(target, iter, body, orelse, async_token.line, async_token.column);
-}
-
 inline std::shared_ptr<ast::Stmt> Parser::parse_break() {
     Token break_token = current();
     if (!match(TokenType::BREAK)) {
@@ -873,35 +668,6 @@ inline std::shared_ptr<ast::Expr> Parser::parse_expr() {
               << ", value='" << current().value << "'" << std::endl;
     std::cerr.flush();
     auto result = parse_disjunction();
-    
-    // Check for walrus operator (named expression) :=
-    // Walrus has lower precedence than 'or' but higher than comma
-    if (current().type == TokenType::WALRUS) {
-        Token walrus_token = current();
-        advance();  // consume :=
-        
-        // Validate that target is a simple Name
-        auto name_expr = std::dynamic_pointer_cast<ast::Name>(result);
-        if (!name_expr) {
-            error("Assignment expression target must be a simple name");
-        }
-        
-        // Create target with Store context
-        auto target = std::make_shared<ast::Name>(
-            name_expr->id(),
-            ast::ExprContext::Store,
-            name_expr->lineno(),
-            name_expr->col_offset()
-        );
-        
-        // Parse value (recursive for right-associativity)
-        auto value = parse_expr();
-        
-        result = std::make_shared<ast::NamedExpr>(
-            target, value, walrus_token.line, walrus_token.column
-        );
-    }
-    
     std::cerr << "[DEBUG parse_expr] Exit, token=" << current_token_
               << ", type=" << static_cast<int>(current().type) << std::endl;
     std::cerr.flush();
@@ -1205,10 +971,6 @@ inline std::shared_ptr<ast::Expr> Parser::parse_atom() {
     } else if (match(TokenType::YIELD)) {
         // Yield expression
         return parse_yield_expr();
-    } else if (match(TokenType::AWAIT)) {
-        // Await expression (Python 3.5+)
-        auto value = parse_primary();
-        return std::make_shared<ast::Await>(value, token.line, token.column);
     } else if (current().type == TokenType::ELLIPSIS) {
         // Ellipsis expression - token already matched, just create the node
         Token ellipsis_token = current();
@@ -1229,8 +991,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_atom() {
 
         auto expr = parse_expr();
 
-        // Check if it's a generator expression: (expr for ...) or (expr async for ...)
-        if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
+        // Check if it's a generator expression: (expr for ...)
+        if (current().type == TokenType::FOR) {
             auto generators = parse_for_if_clauses();
             if (!match(TokenType::RPAREN)) {
                 error("Expected ')' after generator expression");
@@ -1553,8 +1315,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_list() {
     }
     std::cerr.flush();
 
-    // Check if this is a list comprehension (next token is 'for' or 'async')
-    if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
+    // Check if this is a list comprehension (next token is 'for')
+    if (current().type == TokenType::FOR) {
         std::cerr << "[DEBUG parse_list] Detected list comprehension" << std::endl;
         std::cerr.flush();
         // Parse comprehension clauses
@@ -1624,8 +1386,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_dict() {
     // Parse first expression
     auto first_expr = parse_expr();
 
-    // Check if this is a set comprehension: {expr for ...} or {expr async for ...}
-    if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
+    // Check if this is a set comprehension: {expr for ...}
+    if (current().type == TokenType::FOR) {
         auto generators = parse_for_if_clauses();
         if (!match(TokenType::RBRACE)) {
             error("Expected '}' after set comprehension");
@@ -1633,65 +1395,43 @@ inline std::shared_ptr<ast::Expr> Parser::parse_dict() {
         return std::make_shared<ast::SetComp>(first_expr, generators, token.line, token.column);
     }
 
-    // Check if this is a dict (has colon) or set (has comma/rbrace)
-    if (current().type == TokenType::COLON) {
-        // This is a dict literal or dict comprehension
-        advance();  // consume the colon
-        
-        // Parse value
-        auto value = parse_expr();
-        
-        // Check if this is a dict comprehension: {key: value for ...} or {key: value async for ...}
-        if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
-            auto generators = parse_for_if_clauses();
-            if (!match(TokenType::RBRACE)) {
-                error("Expected '}' after dict comprehension");
-            }
-            return std::make_shared<ast::DictComp>(first_expr, value, generators, token.line, token.column);
-        }
-        
-        // Regular dict literal
-        std::vector<std::shared_ptr<ast::Expr>> keys = {first_expr};
-        std::vector<std::shared_ptr<ast::Expr>> values = {value};
-        
-        while (match(TokenType::COMMA)) {
-            if (current().type == TokenType::RBRACE) {
-                break;  // Trailing comma
-            }
-            keys.push_back(parse_expr());
-            if (!match(TokenType::COLON)) {
-                error("Expected ':' in dictionary");
-            }
-            values.push_back(parse_expr());
-        }
-        
-        if (!match(TokenType::RBRACE)) {
-            error("Expected '}'");
-        }
-        
-        return std::make_shared<ast::Dict>(keys, values, token.line, token.column);
-        
-    } else if (current().type == TokenType::COMMA || current().type == TokenType::RBRACE) {
-        // This is a set literal: {1, 2, 3} or {1}
-        std::vector<std::shared_ptr<ast::Expr>> elts = {first_expr};
-        
-        while (match(TokenType::COMMA)) {
-            if (current().type == TokenType::RBRACE) {
-                break;  // Trailing comma
-            }
-            elts.push_back(parse_expr());
-        }
-        
-        if (!match(TokenType::RBRACE)) {
-            error("Expected '}'");
-        }
-        
-        return std::make_shared<ast::Set>(elts, ast::ExprContext::Load, token.line, token.column);
-        
-    } else {
-        error("Expected ':', ',' or '}' after expression in braces");
-        return nullptr;  // Unreachable, but satisfies compiler
+    // Check if this is a dict (key: value) or dict comprehension
+    if (!match(TokenType::COLON)) {
+        error("Expected ':' in dictionary or set");
     }
+
+    // Parse value
+    auto value = parse_expr();
+
+    // Check if this is a dict comprehension: {key: value for ...}
+    if (current().type == TokenType::FOR) {
+        auto generators = parse_for_if_clauses();
+        if (!match(TokenType::RBRACE)) {
+            error("Expected '}' after dict comprehension");
+        }
+        return std::make_shared<ast::DictComp>(first_expr, value, generators, token.line, token.column);
+    }
+
+    // Regular dict literal
+    std::vector<std::shared_ptr<ast::Expr>> keys = {first_expr};
+    std::vector<std::shared_ptr<ast::Expr>> values = {value};
+
+    while (match(TokenType::COMMA)) {
+        if (current().type == TokenType::RBRACE) {
+            break;  // Trailing comma
+        }
+        keys.push_back(parse_expr());
+        if (!match(TokenType::COLON)) {
+            error("Expected ':' in dictionary");
+        }
+        values.push_back(parse_expr());
+    }
+
+    if (!match(TokenType::RBRACE)) {
+        error("Expected '}'");
+    }
+
+    return std::make_shared<ast::Dict>(keys, values, token.line, token.column);
 }
 
 inline std::shared_ptr<ast::Expr> Parser::parse_call() {
@@ -1713,8 +1453,8 @@ inline std::shared_ptr<ast::Expr> Parser::parse_call() {
     return std::make_shared<ast::Call>(func, args, func_token.line, func_token.column);
 }
 
-inline std::vector<ast::arg> Parser::parse_arg_list() {
-    std::vector<ast::arg> args;
+inline std::vector<std::string> Parser::parse_arg_list() {
+    std::vector<std::string> args;
 
     if (current().type == TokenType::RPAREN) {
         return args; // Empty argument list
@@ -1724,17 +1464,8 @@ inline std::vector<ast::arg> Parser::parse_arg_list() {
         if (current().type != TokenType::IDENTIFIER) {
             error("Expected argument name");
         }
-        std::string arg_name = current().value;
+        args.push_back(current().value);
         advance();
-        
-        // Check for type annotation: arg: type
-        std::shared_ptr<ast::Expr> annotation = nullptr;
-        if (current().type == TokenType::COLON) {
-            advance();  // consume ':'
-            annotation = parse_expr();
-        }
-        
-        args.push_back(ast::arg(arg_name, annotation));
 
         if (match(TokenType::COMMA)) {
             continue;
@@ -2536,53 +2267,6 @@ inline std::shared_ptr<ast::Stmt> Parser::parse_with_stmt() {
     return std::make_shared<ast::With>(items, body, with_token.line, with_token.column);
 }
 
-// Parse async with statement (Python 3.5+)
-inline std::shared_ptr<ast::Stmt> Parser::parse_async_with() {
-    Token async_token = tokens_[current_token_ - 1]; // 'async' was already consumed
-    if (!match(TokenType::WITH)) {
-        error("Expected 'with' after 'async'");
-    }
-
-    std::vector<ast::WithItem> items;
-
-    // Check for parenthesized form: 'with' '(' items ')'
-    bool has_parens = match(TokenType::LPAREN);
-
-    // Parse first with_item
-    items.push_back(parse_with_item());
-
-    // Parse remaining items (comma-separated)
-    while (match(TokenType::COMMA)) {
-        // Check for optional trailing comma before closing paren
-        if (has_parens && current().type == TokenType::RPAREN) {
-            break;
-        }
-        items.push_back(parse_with_item());
-    }
-
-    // Consume closing paren if present
-    if (has_parens) {
-        if (!match(TokenType::RPAREN)) {
-            error("Expected ')' after with items");
-        }
-    }
-
-    // Expect colon
-    if (!match(TokenType::COLON)) {
-        error("Expected ':' after async with statement");
-    }
-
-    // Parse body
-    std::vector<std::shared_ptr<ast::Stmt>> body;
-    while (current().type != TokenType::END_OF_FILE &&
-           current().type != TokenType::DEDENT &&
-           current().type != TokenType::NEWLINE) {
-        body.push_back(parse_stmt());
-    }
-
-    return std::make_shared<ast::AsyncWith>(items, body, async_token.line, async_token.column);
-}
-
 // with_item: expression ['as' star_target]
 // Matches CPython's with_item_rule
 inline ast::WithItem Parser::parse_with_item() {
@@ -2605,15 +2289,11 @@ inline ast::WithItem Parser::parse_with_item() {
 inline std::shared_ptr<ast::Expr> Parser::parse_lambda() {
     Token lambda_token = tokens_[current_token_ - 1]; // Get the lambda token we just matched
 
-    // Parse optional parameters (lambda doesn't support annotations yet)
+    // Parse optional parameters
     std::vector<std::string> args;
     if (current().type != TokenType::COLON) {
-        // Parse simple argument names (no annotations for lambda)
-        while (current().type == TokenType::IDENTIFIER) {
-            args.push_back(current().value);
-            advance();
-            if (!match(TokenType::COMMA)) break;
-        }
+        // Parse argument list
+        args = parse_arg_list();
     }
 
     // Expect colon
@@ -2661,8 +2341,8 @@ inline std::vector<ast::Comprehension> Parser::parse_for_if_clauses() {
     generators.push_back(parse_for_if_clause());
 
     // Parse additional for/if clauses
-    while (current().type == TokenType::FOR || current().type == TokenType::IF || current().type == TokenType::ASYNC) {
-        if (current().type == TokenType::FOR || current().type == TokenType::ASYNC) {
+    while (current().type == TokenType::FOR || current().type == TokenType::IF) {
+        if (current().type == TokenType::FOR) {
             generators.push_back(parse_for_if_clause());
         } else if (current().type == TokenType::IF) {
             // Additional if condition for the last comprehension
@@ -2678,16 +2358,9 @@ inline std::vector<ast::Comprehension> Parser::parse_for_if_clauses() {
     return generators;
 }
 
-// for_if_clause: ['async'] 'for' star_targets 'in' disjunction ('if' disjunction)*
-// Matches CPython's for_if_clause rule (Python 3.6+ adds async support)
+// for_if_clause: 'for' star_targets 'in' disjunction ('if' disjunction)*
+// Matches CPython's for_if_clause rule
 inline ast::Comprehension Parser::parse_for_if_clause() {
-    // Check for 'async' keyword (Python 3.6+)
-    bool is_async = false;
-    if (current().type == TokenType::ASYNC) {
-        is_async = true;
-        advance();  // consume 'async'
-    }
-
     if (!match(TokenType::FOR)) {
         error("Expected 'for' in comprehension");
     }
@@ -2709,7 +2382,7 @@ inline ast::Comprehension Parser::parse_for_if_clause() {
         ifs.push_back(parse_expr());
     }
 
-    return ast::Comprehension(target, iter, ifs, is_async);
+    return ast::Comprehension(target, iter, ifs);
 }
 
 // slice: [lower] ':' [upper] [ ':' [step] ]

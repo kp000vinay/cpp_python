@@ -189,22 +189,6 @@ private:
     ExprContext ctx_;
 };
 
-// Set literal: {1, 2, 3}
-class Set : public ASTNodeBase {
-public:
-    Set(std::vector<std::shared_ptr<Expr>> elts, ExprContext ctx,
-        int lineno, int col_offset)
-        : ASTNodeBase(lineno, col_offset), elts_(elts), ctx_(ctx) {}
-
-    const std::vector<std::shared_ptr<Expr>>& elts() const { return elts_; }
-    ExprContext ctx() const { return ctx_; }
-    std::string to_string(int indent = 0) const override;
-
-private:
-    std::vector<std::shared_ptr<Expr>> elts_;
-    ExprContext ctx_;
-};
-
 // Attribute access (obj.attr)
 class Attribute : public ASTNodeBase {
 public:
@@ -433,21 +417,6 @@ inline std::string Tuple::to_string(int indent) const {
     return oss.str();
 }
 
-inline std::string Set::to_string(int indent) const {
-    std::ostringstream oss;
-    oss << indent_str(indent) << "Set(\n";
-    oss << indent_str(indent + 1) << "elts=[\n";
-    for (size_t i = 0; i < elts_.size(); ++i) {
-        oss << elts_[i]->to_string(indent + 2);
-        if (i < elts_.size() - 1) oss << ",";
-        oss << "\n";
-    }
-    oss << indent_str(indent + 1) << "],\n";
-    oss << indent_str(indent + 1) << "ctx=" << context_to_string(ctx_) << "\n";
-    oss << indent_str(indent) << ")";
-    return oss.str();
-}
-
 inline std::string Attribute::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "Attribute(\n";
@@ -536,35 +505,6 @@ private:
     std::shared_ptr<Expr> value_;
 };
 
-// Await expression (Python 3.5+)
-class Await : public ASTNodeBase {
-public:
-    Await(std::shared_ptr<Expr> value, int lineno, int col_offset)
-        : ASTNodeBase(lineno, col_offset), value_(value) {}
-
-    std::shared_ptr<Expr> value() const { return value_; }
-    std::string to_string(int indent = 0) const override;
-
-private:
-    std::shared_ptr<Expr> value_;
-};
-
-// Named expression (walrus operator): name := value (Python 3.8+)
-class NamedExpr : public ASTNodeBase {
-public:
-    NamedExpr(std::shared_ptr<Expr> target, std::shared_ptr<Expr> value,
-              int lineno, int col_offset)
-        : ASTNodeBase(lineno, col_offset), target_(target), value_(value) {}
-
-    std::shared_ptr<Expr> target() const { return target_; }
-    std::shared_ptr<Expr> value() const { return value_; }
-    std::string to_string(int indent = 0) const override;
-
-private:
-    std::shared_ptr<Expr> target_;
-    std::shared_ptr<Expr> value_;
-};
-
 // Conditional expression (ternary operator): x if condition else y
 class IfExp : public ASTNodeBase {
 public:
@@ -588,11 +528,10 @@ struct Comprehension {
     std::shared_ptr<Expr> target;      // star_targets
     std::shared_ptr<Expr> iter;        // disjunction (the iterable)
     std::vector<std::shared_ptr<Expr>> ifs;  // Optional if conditions
-    bool is_async;                     // True for 'async for' (Python 3.6+)
 
     Comprehension(std::shared_ptr<Expr> t, std::shared_ptr<Expr> i,
-                  std::vector<std::shared_ptr<Expr>> conditions, bool async = false)
-        : target(t), iter(i), ifs(conditions), is_async(async) {}
+                  std::vector<std::shared_ptr<Expr>> conditions)
+        : target(t), iter(i), ifs(conditions) {}
 };
 
 // List comprehension: [x for x in range(10)]
@@ -699,26 +638,6 @@ inline std::string YieldFrom::to_string(int indent) const {
     return oss.str();
 }
 
-inline std::string Await::to_string(int indent) const {
-    std::ostringstream oss;
-    oss << indent_str(indent) << "Await(\n";
-    oss << indent_str(indent + 1) << "value=\n";
-    oss << value_->to_string(indent + 2) << "\n";
-    oss << indent_str(indent) << ")";
-    return oss.str();
-}
-
-inline std::string NamedExpr::to_string(int indent) const {
-    std::ostringstream oss;
-    oss << indent_str(indent) << "NamedExpr(\n";
-    oss << indent_str(indent + 1) << "target=\n";
-    oss << target_->to_string(indent + 2) << ",\n";
-    oss << indent_str(indent + 1) << "value=\n";
-    oss << value_->to_string(indent + 2) << "\n";
-    oss << indent_str(indent) << ")";
-    return oss.str();
-}
-
 inline std::string IfExp::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "IfExp(\n";
@@ -737,19 +656,7 @@ inline std::string ListComp::to_string(int indent) const {
     oss << indent_str(indent) << "ListComp(\n";
     oss << indent_str(indent + 1) << "elt=\n";
     oss << elt_->to_string(indent + 2) << ",\n";
-    oss << indent_str(indent + 1) << "generators=[\n";
-    for (const auto& gen : generators_) {
-        oss << indent_str(indent + 2) << "comprehension(";
-        if (gen.is_async) {
-            oss << "async ";
-        }
-        oss << "for " << gen.target->to_string(0) << " in " << gen.iter->to_string(0);
-        if (!gen.ifs.empty()) {
-            oss << " if ...";
-        }
-        oss << "),\n";
-    }
-    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent + 1) << "generators=[...]\n";
     oss << indent_str(indent) << ")";
     return oss.str();
 }
@@ -759,19 +666,7 @@ inline std::string SetComp::to_string(int indent) const {
     oss << indent_str(indent) << "SetComp(\n";
     oss << indent_str(indent + 1) << "elt=\n";
     oss << elt_->to_string(indent + 2) << ",\n";
-    oss << indent_str(indent + 1) << "generators=[\n";
-    for (const auto& gen : generators_) {
-        oss << indent_str(indent + 2) << "comprehension(";
-        if (gen.is_async) {
-            oss << "async ";
-        }
-        oss << "for " << gen.target->to_string(0) << " in " << gen.iter->to_string(0);
-        if (!gen.ifs.empty()) {
-            oss << " if ...";
-        }
-        oss << "),\n";
-    }
-    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent + 1) << "generators=[...]\n";
     oss << indent_str(indent) << ")";
     return oss.str();
 }
@@ -783,19 +678,7 @@ inline std::string DictComp::to_string(int indent) const {
     oss << key_->to_string(indent + 2) << ",\n";
     oss << indent_str(indent + 1) << "value=\n";
     oss << value_->to_string(indent + 2) << ",\n";
-    oss << indent_str(indent + 1) << "generators=[\n";
-    for (const auto& gen : generators_) {
-        oss << indent_str(indent + 2) << "comprehension(";
-        if (gen.is_async) {
-            oss << "async ";
-        }
-        oss << "for " << gen.target->to_string(0) << " in " << gen.iter->to_string(0);
-        if (!gen.ifs.empty()) {
-            oss << " if ...";
-        }
-        oss << "),\n";
-    }
-    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent + 1) << "generators=[...]\n";
     oss << indent_str(indent) << ")";
     return oss.str();
 }
@@ -805,19 +688,7 @@ inline std::string GeneratorExp::to_string(int indent) const {
     oss << indent_str(indent) << "GeneratorExp(\n";
     oss << indent_str(indent + 1) << "elt=\n";
     oss << elt_->to_string(indent + 2) << ",\n";
-    oss << indent_str(indent + 1) << "generators=[\n";
-    for (const auto& gen : generators_) {
-        oss << indent_str(indent + 2) << "comprehension(";
-        if (gen.is_async) {
-            oss << "async ";
-        }
-        oss << "for " << gen.target->to_string(0) << " in " << gen.iter->to_string(0);
-        if (!gen.ifs.empty()) {
-            oss << " if ...";
-        }
-        oss << "),\n";
-    }
-    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent + 1) << "generators=[...]\n";
     oss << indent_str(indent) << ")";
     return oss.str();
 }

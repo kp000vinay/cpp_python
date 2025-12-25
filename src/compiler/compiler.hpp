@@ -128,7 +128,7 @@ inline void Compiler::visit_stmt(std::shared_ptr<ast::Stmt> stmt, int indent, st
         oss << std::string(indent * 2, ' ') << "FunctionDef: " << func_def->name() << "\n";
         oss << std::string(indent * 2, ' ') << "  Args: ";
         for (size_t i = 0; i < func_def->args().size(); ++i) {
-            oss << func_def->args()[i].arg_name;
+            oss << func_def->args()[i];
             if (i < func_def->args().size() - 1) oss << ", ";
         }
         oss << "\n";

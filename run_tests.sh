@@ -63,7 +63,12 @@ declare -a CATEGORIES=(
     "tests/control_flow"
     "tests/async_await"
     "tests/async_comprehensions"
+    "tests/augmented_assignment"
+    "tests/multi_param_subscripts"
+    "tests/imports"
     "tests/set_literals"
+    "tests/try_except"
+    "tests/union_types"
     "tests/walrus_operator"
     "tests/type_annotations"
 )
