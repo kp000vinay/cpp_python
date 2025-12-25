@@ -213,8 +213,8 @@ namespace {
         {"yield", TokenType::YIELD},
         {"async", TokenType::ASYNC},  // Python 3.5+
         {"await", TokenType::AWAIT},  // Python 3.5+
-        {"match", TokenType::MATCH},  // Python 3.10+
-        {"case", TokenType::CASE},    // Python 3.10+
+        {"match", TokenType::MATCH},  // Python 3.10+ soft keyword
+        {"case", TokenType::CASE},    // Python 3.10+ soft keyword
         {"True", TokenType::TRUE},
         {"False", TokenType::FALSE},
         {"None", TokenType::NONE},

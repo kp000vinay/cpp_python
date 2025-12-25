@@ -1299,6 +1299,11 @@ inline std::shared_ptr<ast::Expr> Parser::parse_atom() {
         // Create name, but don't handle call here - let parse_primary handle it
         return std::make_shared<ast::Name>(token.value, ast::ExprContext::Load,
                                            token.line, token.column);
+    } else if (match(TokenType::MATCH) || match(TokenType::CASE)) {
+        // Soft keywords: match and case can be used as identifiers in expressions
+        // This allows code like: if (match := find()) or case = 1
+        return std::make_shared<ast::Name>(token.value, ast::ExprContext::Load,
+                                           token.line, token.column);
     } else if (match(TokenType::LPAREN)) {
         // Check if it's a tuple, generator expression, or parenthesized expression
         if (current().type == TokenType::RPAREN) {
