@@ -259,6 +259,23 @@ private:
     ExprContext ctx_;
 };
 
+// Starred expression (*expr) - used in unpacking assignments and function calls
+// Reference: Python.asdl - Starred(expr value, expr_context ctx)
+class Starred : public ASTNodeBase {
+public:
+    Starred(std::shared_ptr<Expr> value, ExprContext ctx,
+            int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), value_(value), ctx_(ctx) {}
+
+    std::shared_ptr<Expr> value() const { return value_; }
+    ExprContext ctx() const { return ctx_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::shared_ptr<Expr> value_;  // The expression being starred
+    ExprContext ctx_;              // Load (reading) or Store (assignment)
+};
+
 // Expr is already defined in node.hpp as ASTNode
 
 // Helper functions
@@ -488,6 +505,16 @@ inline std::string Subscript::to_string(int indent) const {
     oss << indent_str(indent) << "Subscript(\n";
     oss << value_->to_string(indent + 1) << ",\n";
     oss << slice_->to_string(indent + 1) << ",\n";
+    oss << indent_str(indent + 1) << "ctx=" << context_to_string(ctx_) << "\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string Starred::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "Starred(\n";
+    oss << indent_str(indent + 1) << "value=\n";
+    oss << value_->to_string(indent + 2) << ",\n";
     oss << indent_str(indent + 1) << "ctx=" << context_to_string(ctx_) << "\n";
     oss << indent_str(indent) << ")";
     return oss.str();
