@@ -153,7 +153,7 @@ private:
     size_t line_;
     size_t column_;
 
-    // F-string state tracking
+    // F-string state tracking (PEP 701 compliant)
     struct FStringState {
         char quote;           // ' or "
         int quote_size;       // 1 for single quote, 3 for triple quote
@@ -162,6 +162,9 @@ private:
         int curly_brace_expr_start_depth; // Depth when current expression started (-1 if none)
         bool in_format_spec;  // Are we in format specifier mode (after : in expression)?
         bool has_format_spec; // Have we seen : at the top-level expression?
+        // PEP 701: Additional bracket tracking for nested structures
+        int paren_depth;      // Track ( ) nesting inside expressions
+        int bracket_depth;    // Track [ ] nesting inside expressions
     };
     std::vector<FStringState> fstring_stack_;  // Stack for nested f-strings
 
@@ -536,6 +539,9 @@ inline Token Tokenizer::read_fstring_start() {
     state.curly_brace_expr_start_depth = -1;  // -1 means no active expression
     state.in_format_spec = false;
     state.has_format_spec = false;
+    // PEP 701: Initialize bracket tracking
+    state.paren_depth = 0;
+    state.bracket_depth = 0;
     fstring_stack_.push_back(state);
 
     // Read initial string content until { or end quote
@@ -730,8 +736,9 @@ inline Token Tokenizer::next_token() {
     if (!fstring_stack_.empty()) {
         FStringState& state = fstring_stack_.back();
 
-        // Check for closing quote
-        if (c == state.quote) {
+        // PEP 701: Only check for closing quote when NOT inside an expression
+        // This allows same-quote strings inside f-string expressions
+        if (state.curly_brace_depth == 0 && c == state.quote) {
             bool is_closing = true;
             for (int i = 0; i < state.quote_size; i++) {
                 if (position_ + i >= source_.length() ||
@@ -759,6 +766,9 @@ inline Token Tokenizer::next_token() {
                 if (state.curly_brace_depth == 0) {
                     // This is the start of a new top-level expression
                     state.curly_brace_expr_start_depth = 0;
+                    // PEP 701: Reset bracket tracking for new expression
+                    state.paren_depth = 0;
+                    state.bracket_depth = 0;
                 }
                 state.curly_brace_depth++;
                 position_++;
@@ -767,7 +777,7 @@ inline Token Tokenizer::next_token() {
             }
         }
 
-        // Check for } - end of expression (if depth matches)
+        // Check for } - end of expression (if depth matches and brackets are balanced)
         if (c == '}') {
             // Check for literal }} - only when NOT inside an expression (depth == 0)
             if (state.curly_brace_depth == 0 && 
@@ -775,21 +785,26 @@ inline Token Tokenizer::next_token() {
                 // Literal }} - handled in read_fstring_middle
                 return read_fstring_middle();
             } else if (state.curly_brace_depth > 0) {
-                // End of expression - decrement depth and emit RBRACE
-                state.curly_brace_depth--;
-                if (state.curly_brace_depth == 0) {
-                    // End of top-level expression
-                    state.in_format_spec = false;
-                    state.has_format_spec = false;
-                    state.curly_brace_expr_start_depth = -1;
-                } else if (state.has_format_spec && 
-                           state.curly_brace_depth - 1 == state.curly_brace_expr_start_depth) {
-                    // We're back at the format spec level after a nested expression
-                    state.in_format_spec = true;
+                // PEP 701: Only close expression if brackets are balanced
+                // This prevents } inside dict literals from closing the expression
+                if (state.paren_depth == 0 && state.bracket_depth == 0) {
+                    // End of expression - decrement depth and emit RBRACE
+                    state.curly_brace_depth--;
+                    if (state.curly_brace_depth == 0) {
+                        // End of top-level expression
+                        state.in_format_spec = false;
+                        state.has_format_spec = false;
+                        state.curly_brace_expr_start_depth = -1;
+                    } else if (state.has_format_spec && 
+                               state.curly_brace_depth - 1 == state.curly_brace_expr_start_depth) {
+                        // We're back at the format spec level after a nested expression
+                        state.in_format_spec = true;
+                    }
+                    position_++;
+                    column_++;
+                    return Token(TokenType::RBRACE, "}", line_, start_col);
                 }
-                position_++;
-                column_++;
-                return Token(TokenType::RBRACE, "}", line_, start_col);
+                // This } is part of a dict literal - fall through to normal tokenization
             } else {
                 // This shouldn't happen - unmatched }
                 position_++;
@@ -799,9 +814,10 @@ inline Token Tokenizer::next_token() {
         }
 
         // Check for : at the expression start depth (format specifier)
-        // This must be checked BEFORE falling through to normal tokenization
+        // PEP 701: Only treat as format spec if brackets are balanced
         if (c == ':' && state.curly_brace_depth > 0 && 
-            state.curly_brace_depth - 1 == state.curly_brace_expr_start_depth) {
+            state.curly_brace_depth - 1 == state.curly_brace_expr_start_depth &&
+            state.paren_depth == 0 && state.bracket_depth == 0) {
             // This is the format specifier colon
             state.in_format_spec = true;
             state.has_format_spec = true;  // Remember we've seen :
@@ -813,7 +829,17 @@ inline Token Tokenizer::next_token() {
         // If we're inside an expression (depth > 0) and NOT in format spec, tokenize normally
         // Otherwise, read f-string middle (literal text)
         if (state.curly_brace_depth > 0 && !state.in_format_spec) {
-            // We're inside an expression - fall through to normal tokenization
+            // PEP 701: Track parentheses and brackets for proper nesting
+            if (c == '(') {
+                state.paren_depth++;
+            } else if (c == ')') {
+                if (state.paren_depth > 0) state.paren_depth--;
+            } else if (c == '[') {
+                state.bracket_depth++;
+            } else if (c == ']') {
+                if (state.bracket_depth > 0) state.bracket_depth--;
+            }
+            // Fall through to normal tokenization
         } else {
             return read_fstring_middle();
         }
