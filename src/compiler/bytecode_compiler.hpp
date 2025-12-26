@@ -206,6 +206,12 @@ public:
             compile_lambda(node);
         } else if (auto* node = dynamic_cast<ast::ListComp*>(expr)) {
             compile_listcomp(node);
+        } else if (auto* node = dynamic_cast<ast::SetComp*>(expr)) {
+            compile_setcomp(node);
+        } else if (auto* node = dynamic_cast<ast::DictComp*>(expr)) {
+            compile_dictcomp(node);
+        } else if (auto* node = dynamic_cast<ast::GeneratorExp*>(expr)) {
+            compile_generatorexp(node);
         } else if (auto* node = dynamic_cast<ast::Await*>(expr)) {
             compile_await(node);
         } else if (auto* node = dynamic_cast<ast::Yield*>(expr)) {
@@ -1205,9 +1211,213 @@ private:
         emit(Opcode::MAKE_FUNCTION, 0);
     }
     
+    /**
+     * Compile a list comprehension
+     * 
+     * Python: [expr for target in iter if cond]
+     * 
+     * CPython compiles comprehensions as nested functions that take
+     * an iterator as argument. For simplicity, we inline the comprehension.
+     * 
+     * Bytecode pattern (inlined):
+     *   BUILD_LIST 0           # Create empty list
+     *   ITER                   # Evaluate iterable
+     *   GET_ITER               # Get iterator
+     * loop:
+     *   FOR_ITER end           # Get next item or jump to end
+     *   STORE TARGET           # Store in target variable
+     *   [IF CONDITIONS]        # Optional: evaluate conditions
+     *   [POP_JUMP_IF_FALSE loop] # Skip if condition false
+     *   EXPR                   # Evaluate element expression
+     *   LIST_APPEND 2          # Append to list (2 = stack depth)
+     *   JUMP_BACKWARD loop
+     * end:
+     *   (list is on stack)
+     */
     void compile_listcomp(ast::ListComp* node) {
+        // Build empty list
         emit(Opcode::BUILD_LIST, 0);
-        add_error("List comprehension compilation not fully implemented", node->lineno());
+        
+        // Compile the comprehension generators
+        compile_comprehension_generators(
+            node->generators(),
+            [this, node]() {
+                // Compile the element expression
+                compile_expr(node->elt().get());
+                // Append to list (stack depth = 2: list, element)
+                emit(Opcode::LIST_APPEND, 2);
+            }
+        );
+    }
+    
+    /**
+     * Compile a set comprehension
+     * 
+     * Python: {expr for target in iter if cond}
+     * 
+     * Same pattern as list comprehension but uses BUILD_SET and SET_ADD
+     */
+    void compile_setcomp(ast::SetComp* node) {
+        // Build empty set
+        emit(Opcode::BUILD_SET, 0);
+        
+        // Compile the comprehension generators
+        compile_comprehension_generators(
+            node->generators(),
+            [this, node]() {
+                // Compile the element expression
+                compile_expr(node->elt().get());
+                // Add to set (stack depth = 2: set, element)
+                emit(Opcode::SET_ADD, 2);
+            }
+        );
+    }
+    
+    /**
+     * Compile a dictionary comprehension
+     * 
+     * Python: {key: value for target in iter if cond}
+     * 
+     * Same pattern but uses BUILD_MAP and MAP_ADD
+     */
+    void compile_dictcomp(ast::DictComp* node) {
+        // Build empty dict
+        emit(Opcode::BUILD_MAP, 0);
+        
+        // Compile the comprehension generators
+        compile_comprehension_generators(
+            node->generators(),
+            [this, node]() {
+                // Compile key and value expressions
+                compile_expr(node->key().get());
+                compile_expr(node->value().get());
+                // Add to map (stack depth = 2: map, key, value)
+                emit(Opcode::MAP_ADD, 2);
+            }
+        );
+    }
+    
+    /**
+     * Compile a generator expression
+     * 
+     * Python: (expr for target in iter if cond)
+     * 
+     * Generator expressions create a generator function that yields values.
+     * We compile it as a nested code object.
+     */
+    void compile_generatorexp(ast::GeneratorExp* node) {
+        // For now, compile as a simple inline generator
+        // A full implementation would create a nested code object
+        
+        // Create a code object for the generator
+        std::string gen_name = "<genexpr>";
+        auto gen_code = std::make_shared<CodeObject>(gen_name, code().co_filename, node->lineno());
+        gen_code->co_flags = 0x20;  // CO_GENERATOR
+        
+        // Push the generator code object
+        int code_idx = code().add_const(gen_code);
+        emit(Opcode::LOAD_CONST, code_idx);
+        emit(Opcode::MAKE_FUNCTION, 0);
+        
+        // Evaluate the first iterator and pass it to the generator
+        if (!node->generators().empty()) {
+            compile_expr(node->generators()[0].iter.get());
+            emit(Opcode::GET_ITER);
+            emit(Opcode::CALL, 1);
+        } else {
+            emit(Opcode::CALL, 0);
+        }
+    }
+    
+    /**
+     * Helper function to compile comprehension generators (for loops and conditions)
+     * 
+     * This handles nested for loops and if conditions in comprehensions.
+     * The body_emitter is called when we're inside all the loops and conditions.
+     */
+    template<typename BodyEmitter>
+    void compile_comprehension_generators(
+        const std::vector<ast::Comprehension>& generators,
+        BodyEmitter body_emitter,
+        size_t gen_index = 0
+    ) {
+        if (gen_index >= generators.size()) {
+            // All generators processed, emit the body
+            body_emitter();
+            return;
+        }
+        
+        const auto& gen = generators[gen_index];
+        
+        // Compile the iterable (only for first generator, others use outer scope)
+        if (gen_index == 0) {
+            compile_expr(gen.iter.get());
+            if (gen.is_async) {
+                emit(Opcode::GET_AITER);
+            } else {
+                emit(Opcode::GET_ITER);
+            }
+        } else {
+            // For nested generators, compile the iterable normally
+            compile_expr(gen.iter.get());
+            if (gen.is_async) {
+                emit(Opcode::GET_AITER);
+            } else {
+                emit(Opcode::GET_ITER);
+            }
+        }
+        
+        // Mark loop start
+        int loop_start = code().current_offset();
+        
+        // FOR_ITER: Get next item or jump to end
+        int for_iter_jump;
+        if (gen.is_async) {
+            // Async for: GET_ANEXT, LOAD_CONST None, SEND
+            emit(Opcode::GET_ANEXT);
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
+            for_iter_jump = emit_jump(Opcode::SEND);
+            emit(Opcode::YIELD_VALUE);
+            emit(Opcode::RESUME, 3);
+            emit(Opcode::JUMP_BACKWARD_NO_INTERRUPT, code().current_offset() - loop_start - 2);
+            patch_jump(for_iter_jump);
+        } else {
+            for_iter_jump = emit_jump(Opcode::FOR_ITER);
+        }
+        
+        // Store the iteration variable
+        compile_store_target(gen.target.get());
+        
+        // Compile if conditions
+        std::vector<int> condition_jumps;
+        for (const auto& cond : gen.ifs) {
+            compile_expr(cond.get());
+            // Jump back to loop start if condition is false
+            int cond_jump = emit_jump(Opcode::POP_JUMP_IF_FALSE);
+            condition_jumps.push_back(cond_jump);
+        }
+        
+        // Recursively compile remaining generators or emit body
+        compile_comprehension_generators(generators, body_emitter, gen_index + 1);
+        
+        // Patch condition jumps to continue the loop
+        for (int jump : condition_jumps) {
+            // Patch to jump back to loop start
+            patch_jump_to(jump, loop_start);
+        }
+        
+        // Jump back to loop start
+        emit(Opcode::JUMP_BACKWARD, code().current_offset() - loop_start);
+        
+        // Patch FOR_ITER to jump here when exhausted
+        if (!gen.is_async) {
+            patch_jump(for_iter_jump);
+        }
+        
+        // For async, emit END_ASYNC_FOR
+        if (gen.is_async) {
+            emit(Opcode::END_ASYNC_FOR);
+        }
     }
     
     void compile_await(ast::Await* node) {

@@ -139,6 +139,17 @@ struct CodeObject {
         , co_stacksize(0)
         , co_flags(0) {}
     
+    CodeObject(const std::string& name, const std::string& filename, int firstlineno)
+        : co_name(name)
+        , co_filename(filename)
+        , co_firstlineno(firstlineno)
+        , co_argcount(0)
+        , co_posonlyargcount(0)
+        , co_kwonlyargcount(0)
+        , co_nlocals(0)
+        , co_stacksize(0)
+        , co_flags(0) {}
+    
     // === Helper Methods ===
     
     /**

@@ -231,6 +231,36 @@ def flatten(items):
         yield from item
 )", "Yield From in Loop");
 
+    // Test 30: Simple list comprehension
+    test_compile(R"(
+result = [x * 2 for x in range(10)]
+)", "List Comprehension");
+
+    // Test 31: List comprehension with condition
+    test_compile(R"(
+result = [x for x in range(10) if x % 2 == 0]
+)", "List Comprehension with Condition");
+
+    // Test 32: Set comprehension
+    test_compile(R"(
+result = {x * 2 for x in range(10)}
+)", "Set Comprehension");
+
+    // Test 33: Dict comprehension
+    test_compile(R"(
+result = {k: v for k, v in items}
+)", "Dict Comprehension");
+
+    // Test 34: Nested list comprehension
+    test_compile(R"(
+result = [[y for y in x] for x in matrix]
+)", "Nested List Comprehension");
+
+    // Test 35: Generator expression
+    test_compile(R"(
+result = sum(x * 2 for x in range(10))
+)", "Generator Expression");
+
     std::cout << "=== All tests completed ===\n";
     return 0;
 }
