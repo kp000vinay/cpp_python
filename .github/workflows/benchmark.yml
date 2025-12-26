@@ -1,0 +1,193 @@
+name: Performance Benchmark
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+  schedule:
+    # Run weekly on Sunday at midnight UTC
+    - cron: '0 0 * * 0'
+
+jobs:
+  benchmark:
+    name: Benchmark on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            python-version: '3.12'
+            
+          - os: macos-latest
+            python-version: '3.12'
+            
+          - os: windows-latest
+            python-version: '3.12'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install statistics
+
+      - name: Install GCC (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-12
+
+      - name: Setup MSVC (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build cpp_parser (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          g++ -std=c++20 -O3 -DNDEBUG -I. main.cpp -o cpp_parser
+
+      - name: Build cpp_parser (macOS)
+        if: matrix.os == 'macos-latest'
+        run: |
+          clang++ -std=c++20 -O3 -DNDEBUG -I. main.cpp -o cpp_parser
+
+      - name: Build cpp_parser (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cl /std:c++20 /O2 /DNDEBUG /I. /EHsc main.cpp /Fe:cpp_parser.exe
+
+      - name: Run Benchmark (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          python benchmarks/benchmark_ci.py --output benchmark_results.json
+
+      - name: Run Benchmark (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          python benchmarks/benchmark_ci.py --output benchmark_results.json --parser cpp_parser.exe
+
+      - name: Display Benchmark Results
+        run: |
+          python -c "
+          import json
+          with open('benchmark_results.json', 'r') as f:
+              results = json.load(f)
+          
+          print('=' * 70)
+          print('PERFORMANCE BENCHMARK RESULTS')
+          print('=' * 70)
+          print(f\"Platform: {results['platform']}\")
+          print(f\"Python Version: {results['python_version']}\")
+          print(f\"Timestamp: {results['timestamp']}\")
+          print()
+          
+          print('Test Results:')
+          print('-' * 70)
+          print(f\"{'Test Case':<30} {'CPython (ms)':<15} {'cpp_parser (ms)':<15} {'Ratio':<10}\")
+          print('-' * 70)
+          
+          for test in results['tests']:
+              name = test['name'][:28]
+              cpython_ms = test['cpython_mean_ms']
+              cpp_ms = test['cpp_mean_ms']
+              ratio = test['ratio']
+              print(f\"{name:<30} {cpython_ms:<15.3f} {cpp_ms:<15.3f} {ratio:<10.2f}x\")
+          
+          print('-' * 70)
+          print()
+          print('Summary:')
+          print(f\"  Average ratio: {results['summary']['average_ratio']:.2f}x\")
+          print(f\"  cpp_parser is {results['summary']['comparison']}\")
+          print('=' * 70)
+          "
+
+      - name: Upload Benchmark Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ matrix.os }}
+          path: benchmark_results.json
+
+      - name: Comment PR with Benchmark Results
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const results = JSON.parse(fs.readFileSync('benchmark_results.json', 'utf8'));
+            
+            let body = `## Performance Benchmark Results (${{ matrix.os }})\n\n`;
+            body += `**Platform:** ${results.platform}\n`;
+            body += `**Python Version:** ${results.python_version}\n\n`;
+            body += `| Test Case | CPython (ms) | cpp_parser (ms) | Ratio |\n`;
+            body += `|-----------|--------------|-----------------|-------|\n`;
+            
+            for (const test of results.tests) {
+              body += `| ${test.name} | ${test.cpython_mean_ms.toFixed(3)} | ${test.cpp_mean_ms.toFixed(3)} | ${test.ratio.toFixed(2)}x |\n`;
+            }
+            
+            body += `\n**Summary:** cpp_parser is ${results.summary.comparison} (${results.summary.average_ratio.toFixed(2)}x average)\n`;
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: body
+            });
+
+  compare-platforms:
+    name: Compare Platform Results
+    needs: benchmark
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - name: Download all benchmark artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: benchmark-results-*
+          merge-multiple: false
+
+      - name: Generate Comparison Report
+        run: |
+          python3 << 'EOF'
+          import json
+          import os
+          
+          results = {}
+          for dir_name in os.listdir('.'):
+              if dir_name.startswith('benchmark-results-'):
+                  platform = dir_name.replace('benchmark-results-', '')
+                  json_path = os.path.join(dir_name, 'benchmark_results.json')
+                  if os.path.exists(json_path):
+                      with open(json_path, 'r') as f:
+                          results[platform] = json.load(f)
+          
+          print('=' * 80)
+          print('CROSS-PLATFORM PERFORMANCE COMPARISON')
+          print('=' * 80)
+          print()
+          
+          if not results:
+              print('No benchmark results found.')
+          else:
+              # Print summary for each platform
+              print(f"{'Platform':<20} {'Avg Ratio':<15} {'Status':<20}")
+              print('-' * 55)
+              for platform, data in results.items():
+                  avg_ratio = data['summary']['average_ratio']
+                  comparison = data['summary']['comparison']
+                  print(f"{platform:<20} {avg_ratio:<15.2f}x {comparison:<20}")
+              
+              print()
+              print('=' * 80)
+          EOF
