@@ -79,6 +79,7 @@ declare -a CATEGORIES=(
     "tests/except_star"
     "tests/fstrings"
     "tests/generics"
+    "tests/tstrings"
 )
 
 for category in "${CATEGORIES[@]}"; do

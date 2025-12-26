@@ -247,6 +247,10 @@ private:
     std::shared_ptr<ast::Expr> parse_formatted_value();
     std::shared_ptr<ast::Expr> parse_fstring_format_spec();
 
+    // T-string parsing (PEP 750)
+    std::shared_ptr<ast::Expr> parse_tstring();
+    std::shared_ptr<ast::Expr> parse_interpolation();
+
     // Error handling
     void error(const std::string& message);
 };
@@ -1397,6 +1401,9 @@ inline std::shared_ptr<ast::Expr> Parser::parse_atom() {
     } else if (current().type == TokenType::FSTRING_START) {
         // F-string - don't use match() because parse_fstring() expects to see FSTRING_START
         return parse_fstring();
+    } else if (current().type == TokenType::TSTRING_START) {
+        // T-string (PEP 750) - don't use match() because parse_tstring() expects to see TSTRING_START
+        return parse_tstring();
     } else if (match(TokenType::TRUE)) {
         return std::make_shared<ast::Constant>("True", token.line, token.column);
     } else if (match(TokenType::FALSE)) {
@@ -1582,14 +1589,15 @@ inline std::shared_ptr<ast::Expr> Parser::parse_formatted_value() {
         value, conversion, format_spec, lbrace.line, lbrace.column);
 }
 
-// Parse format specifier: can contain FSTRING_MIDDLE tokens and nested formatted_value
+// Parse format specifier: can contain FSTRING_MIDDLE/TSTRING_MIDDLE tokens and nested formatted_value/interpolation
 inline std::shared_ptr<ast::Expr> Parser::parse_fstring_format_spec() {
     std::vector<std::shared_ptr<ast::Expr>> values;
 
     // Parse format spec parts until we see } (end of formatted value)
-    // We need to track when we're done - the } will be consumed by parse_formatted_value
+    // We need to track when we're done - the } will be consumed by parse_formatted_value/parse_interpolation
     while (current().type != TokenType::RBRACE) {
-        if (current().type == TokenType::FSTRING_MIDDLE) {
+        if (current().type == TokenType::FSTRING_MIDDLE ||
+            current().type == TokenType::TSTRING_MIDDLE) {
             // Literal format text (e.g., ".2f", ">10")
             Token middle = current();
             advance();
@@ -1598,7 +1606,7 @@ inline std::shared_ptr<ast::Expr> Parser::parse_fstring_format_spec() {
                     middle.value, middle.line, middle.column));
             }
         } else if (current().type == TokenType::LBRACE) {
-            // Nested f-string replacement field in format spec
+            // Nested f-string/t-string replacement field in format spec
             values.push_back(parse_formatted_value());
         } else {
             // End of format spec (should be })
@@ -1619,6 +1627,138 @@ inline std::shared_ptr<ast::Expr> Parser::parse_fstring_format_spec() {
 
     // Otherwise return JoinedStr
     return std::make_shared<ast::JoinedStr>(values, current().line, current().column);
+}
+
+// Parse t-string (PEP 750): TSTRING_START (TSTRING_MIDDLE | interpolation)* TSTRING_END
+// T-strings are similar to f-strings but produce Template objects with Interpolation nodes
+inline std::shared_ptr<ast::Expr> Parser::parse_tstring() {
+    Token start_token = current();
+    if (start_token.type != TokenType::TSTRING_START) {
+        error("Expected TSTRING_START");
+        return nullptr;
+    }
+    advance();  // consume TSTRING_START
+
+    std::vector<std::shared_ptr<ast::Expr>> values;
+
+    // Add initial string part if present
+    if (!start_token.value.empty()) {
+        values.push_back(std::make_shared<ast::Constant>(
+            start_token.value, start_token.line, start_token.column));
+    }
+
+    // Parse alternating TSTRING_MIDDLE and interpolation until TSTRING_END
+    while (current().type != TokenType::TSTRING_END) {
+        if (current().type == TokenType::TSTRING_MIDDLE) {
+            // Literal string part
+            Token middle = current();
+            advance();
+            if (!middle.value.empty()) {
+                values.push_back(std::make_shared<ast::Constant>(
+                    middle.value, middle.line, middle.column));
+            }
+        } else if (current().type == TokenType::LBRACE) {
+            // Interpolation part: {expr!conversion:format_spec}
+            values.push_back(parse_interpolation());
+        } else {
+            error("Expected TSTRING_MIDDLE or '{' in t-string");
+            return nullptr;
+        }
+    }
+
+    // Parse TSTRING_END
+    Token end_token = current();
+    advance();  // consume TSTRING_END
+
+    // If we only have one constant value, return it directly (optimization)
+    // Otherwise, return TemplateStr
+    if (values.size() == 1 &&
+        std::dynamic_pointer_cast<ast::Constant>(values[0])) {
+        return values[0];
+    }
+
+    return std::make_shared<ast::TemplateStr>(values, start_token.line, start_token.column);
+}
+
+// Parse interpolation: {expr [!conversion] [:format_spec]}
+// Similar to FormattedValue but includes the original expression text
+inline std::shared_ptr<ast::Expr> Parser::parse_interpolation() {
+    // Parse '{'
+    Token lbrace = current();
+    if (lbrace.type != TokenType::LBRACE) {
+        error("Expected '{' in interpolation");
+        return nullptr;
+    }
+    
+    // Record position for capturing expression text
+    size_t expr_start_pos = current_token_;
+    advance();
+
+    // Parse expression (can be any expression, including nested t-strings)
+    std::shared_ptr<ast::Expr> value = parse_expr();
+    
+    // Capture the expression text from tokens
+    // We need to reconstruct the expression text from the tokens between { and !/:/ }
+    std::string expr_str;
+    for (size_t i = expr_start_pos + 1; i < current_token_; ++i) {
+        if (i > expr_start_pos + 1) {
+            // Add space between tokens (simplified - could be smarter about spacing)
+            if (!expr_str.empty() && !tokens_[i].value.empty()) {
+                // Don't add space before/after certain tokens
+                char last_char = expr_str.back();
+                char first_char = tokens_[i].value[0];
+                bool needs_space = true;
+                if (last_char == '(' || last_char == '[' || last_char == '.' ||
+                    first_char == ')' || first_char == ']' || first_char == '.' ||
+                    first_char == ',' || first_char == ':') {
+                    needs_space = false;
+                }
+                if (needs_space) {
+                    expr_str += " ";
+                }
+            }
+        }
+        expr_str += tokens_[i].value;
+    }
+
+    // Parse optional conversion: !s, !r, !a
+    int conversion = -1;
+    if (match(TokenType::EXCLAIM)) {
+        if (current().type == TokenType::IDENTIFIER) {
+            std::string conv_char = current().value;
+            if (conv_char == "s") {
+                conversion = 115;
+            } else if (conv_char == "r") {
+                conversion = 114;
+            } else if (conv_char == "a") {
+                conversion = 97;
+            } else {
+                error("Invalid conversion specifier: !" + conv_char);
+                return nullptr;
+            }
+            advance();
+        } else {
+            error("Expected conversion specifier (s, r, or a) after '!'");
+            return nullptr;
+        }
+    }
+
+    // Parse optional format specifier: :format_spec
+    // For t-strings, format_spec can be a JoinedStr (same as f-strings)
+    std::shared_ptr<ast::Expr> format_spec = nullptr;
+    if (match(TokenType::COLON)) {
+        // Reuse f-string format spec parsing for t-strings
+        format_spec = parse_fstring_format_spec();
+    }
+
+    // Parse '}'
+    if (!match(TokenType::RBRACE)) {
+        error("Expected '}' in t-string interpolation");
+        return nullptr;
+    }
+
+    return std::make_shared<ast::Interpolation>(
+        value, expr_str, conversion, format_spec, lbrace.line, lbrace.column);
 }
 
 // Parse primary expression (handles left-recursive attribute, subscript, call)
