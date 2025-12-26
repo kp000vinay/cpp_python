@@ -1,0 +1,278 @@
+#ifndef CPYTHON_CPP_COMPILER_OPCODE_HPP
+#define CPYTHON_CPP_COMPILER_OPCODE_HPP
+
+#include <cstdint>
+#include <string>
+#include <unordered_map>
+
+namespace cpython_cpp {
+namespace compiler {
+
+/**
+ * Python Bytecode Opcodes
+ * Reference: CPython Include/opcode_ids.h (Python 3.12+)
+ * 
+ * This defines the instruction set for the bytecode compiler.
+ * Opcodes are designed to be compatible with CPython's bytecode format.
+ */
+
+enum class Opcode : uint8_t {
+    // === Stack Operations ===
+    POP_TOP                 = 31,   // Pop top of stack
+    PUSH_NULL               = 33,   // Push NULL onto stack
+    SWAP                    = 117,  // Swap top two stack items
+    COPY                    = 59,   // Copy item from stack position
+    
+    // === Constants ===
+    LOAD_CONST              = 82,   // Load constant from co_consts
+    LOAD_SMALL_INT          = 94,   // Load small integer (0-255) directly
+    
+    // === Local Variables ===
+    LOAD_FAST               = 84,   // Load local variable
+    STORE_FAST              = 112,  // Store local variable
+    DELETE_FAST             = 63,   // Delete local variable
+    LOAD_FAST_CHECK         = 88,   // Load local with unbound check
+    LOAD_FAST_AND_CLEAR     = 85,   // Load and clear local
+    LOAD_FAST_LOAD_FAST     = 89,   // Load two locals (optimization)
+    STORE_FAST_LOAD_FAST    = 113,  // Store then load (optimization)
+    STORE_FAST_STORE_FAST   = 114,  // Store two locals (optimization)
+    
+    // === Global/Name Variables ===
+    LOAD_NAME               = 93,   // Load name from namespace
+    STORE_NAME              = 116,  // Store name in namespace
+    DELETE_NAME             = 65,   // Delete name from namespace
+    LOAD_GLOBAL             = 92,   // Load global variable
+    STORE_GLOBAL            = 115,  // Store global variable
+    DELETE_GLOBAL           = 64,   // Delete global variable
+    
+    // === Closure Variables ===
+    LOAD_DEREF              = 83,   // Load from closure cell
+    STORE_DEREF             = 111,  // Store to closure cell
+    DELETE_DEREF            = 62,   // Delete from closure cell
+    MAKE_CELL               = 97,   // Create cell for closure
+    COPY_FREE_VARS          = 60,   // Copy free variables
+    LOAD_FROM_DICT_OR_DEREF = 90,   // Load from dict or closure
+    LOAD_FROM_DICT_OR_GLOBALS = 91, // Load from dict or globals
+    
+    // === Attributes ===
+    LOAD_ATTR               = 80,   // Load attribute
+    STORE_ATTR              = 110,  // Store attribute
+    DELETE_ATTR             = 61,   // Delete attribute
+    LOAD_SUPER_ATTR         = 96,   // Load super attribute
+    
+    // === Subscript/Slice ===
+    BINARY_SLICE            = 1,    // Binary slice operation
+    STORE_SLICE             = 37,   // Store slice
+    STORE_SUBSCR            = 38,   // Store subscript (obj[key] = value)
+    DELETE_SUBSCR           = 8,    // Delete subscript
+    
+    // === Binary Operations ===
+    BINARY_OP               = 44,   // Generic binary operation
+    
+    // === Unary Operations ===
+    UNARY_NEGATIVE          = 41,   // Negate (-x)
+    UNARY_NOT               = 42,   // Boolean not (not x)
+    UNARY_INVERT            = 40,   // Bitwise invert (~x)
+    TO_BOOL                 = 39,   // Convert to boolean
+    
+    // === Comparison ===
+    COMPARE_OP              = 56,   // Comparison operation
+    IS_OP                   = 74,   // Identity check (is/is not)
+    CONTAINS_OP             = 57,   // Membership check (in/not in)
+    
+    // === Control Flow - Jumps ===
+    JUMP_FORWARD            = 77,   // Jump forward (unconditional)
+    JUMP_BACKWARD           = 75,   // Jump backward (unconditional)
+    JUMP_BACKWARD_NO_INTERRUPT = 76, // Jump backward without interrupt check
+    POP_JUMP_IF_FALSE       = 100,  // Pop and jump if false
+    POP_JUMP_IF_TRUE        = 103,  // Pop and jump if true
+    POP_JUMP_IF_NONE        = 101,  // Pop and jump if None
+    POP_JUMP_IF_NOT_NONE    = 102,  // Pop and jump if not None
+    
+    // === Iteration ===
+    GET_ITER                = 16,   // Get iterator from iterable
+    GET_AITER               = 14,   // Get async iterator
+    GET_ANEXT               = 15,   // Get next from async iterator
+    FOR_ITER                = 70,   // Iterate (next or jump)
+    END_FOR                 = 9,    // End for loop cleanup
+    POP_ITER                = 30,   // Pop iterator from stack
+    GET_YIELD_FROM_ITER     = 19,   // Get yield from iterator
+    
+    // === Function/Call ===
+    CALL                    = 52,   // Call function
+    CALL_FUNCTION_EX        = 4,    // Call with *args/**kwargs
+    CALL_KW                 = 55,   // Call with keyword arguments
+    RETURN_VALUE            = 35,   // Return from function
+    RETURN_GENERATOR        = 34,   // Return generator object
+    MAKE_FUNCTION           = 23,   // Create function object
+    SET_FUNCTION_ATTRIBUTE  = 108,  // Set function attribute
+    LOAD_BUILD_CLASS        = 21,   // Load __build_class__
+    
+    // === Building Objects ===
+    BUILD_LIST              = 46,   // Build list from stack items
+    BUILD_TUPLE             = 51,   // Build tuple from stack items
+    BUILD_SET               = 48,   // Build set from stack items
+    BUILD_MAP               = 47,   // Build dict from stack items
+    BUILD_STRING            = 50,   // Build string (f-strings)
+    BUILD_SLICE             = 49,   // Build slice object
+    BUILD_TEMPLATE          = 2,    // Build template (t-strings)
+    BUILD_INTERPOLATION     = 45,   // Build interpolation (t-strings)
+    
+    // === List/Set/Dict Operations ===
+    LIST_APPEND             = 78,   // Append to list (comprehensions)
+    LIST_EXTEND             = 79,   // Extend list
+    SET_ADD                 = 107,  // Add to set (comprehensions)
+    SET_UPDATE              = 109,  // Update set
+    MAP_ADD                 = 98,   // Add to map (dict comprehensions)
+    DICT_MERGE              = 66,   // Merge dicts
+    DICT_UPDATE             = 67,   // Update dict
+    
+    // === Exception Handling ===
+    PUSH_EXC_INFO           = 32,   // Push exception info
+    POP_EXCEPT              = 29,   // Pop exception handler
+    RAISE_VARARGS           = 104,  // Raise exception
+    RERAISE                 = 105,  // Re-raise current exception
+    CHECK_EXC_MATCH         = 6,    // Check exception match
+    CHECK_EG_MATCH          = 5,    // Check exception group match
+    CLEANUP_THROW           = 7,    // Cleanup after throw
+    WITH_EXCEPT_START       = 43,   // Start with exception handling
+    END_ASYNC_FOR           = 68,   // End async for loop
+    
+    // === Unpacking ===
+    UNPACK_SEQUENCE         = 119,  // Unpack sequence to stack
+    UNPACK_EX               = 118,  // Unpack with starred element
+    GET_LEN                 = 18,   // Get length for unpacking
+    
+    // === Import ===
+    IMPORT_NAME             = 73,   // Import module
+    IMPORT_FROM             = 72,   // Import from module
+    
+    // === Pattern Matching ===
+    MATCH_MAPPING           = 25,   // Match mapping pattern
+    MATCH_SEQUENCE          = 26,   // Match sequence pattern
+    MATCH_KEYS              = 24,   // Match dict keys
+    MATCH_CLASS             = 99,   // Match class pattern
+    
+    // === Async/Await ===
+    GET_AWAITABLE           = 71,   // Get awaitable
+    SEND                    = 106,  // Send to generator/coroutine
+    YIELD_VALUE             = 120,  // Yield value
+    END_SEND                = 10,   // End send operation
+    
+    // === Format ===
+    FORMAT_SIMPLE           = 12,   // Simple format
+    FORMAT_WITH_SPEC        = 13,   // Format with spec
+    CONVERT_VALUE           = 58,   // Convert value (!s, !r, !a)
+    
+    // === Misc ===
+    NOP                     = 27,   // No operation
+    EXTENDED_ARG            = 69,   // Extended argument prefix
+    RESUME                  = 128,  // Resume execution
+    CACHE                   = 0,    // Cache slot (internal)
+    SETUP_ANNOTATIONS       = 36,   // Setup __annotations__
+    LOAD_LOCALS             = 22,   // Load locals dict
+    LOAD_SPECIAL            = 95,   // Load special method
+    LOAD_COMMON_CONSTANT    = 81,   // Load common constant
+    CALL_INTRINSIC_1        = 53,   // Call intrinsic (1 arg)
+    CALL_INTRINSIC_2        = 54,   // Call intrinsic (2 args)
+    INTERPRETER_EXIT        = 20,   // Exit interpreter
+    EXIT_INIT_CHECK         = 11,   // Check __init__ exit
+};
+
+/**
+ * Binary operation sub-opcodes for BINARY_OP
+ * These are passed as the argument to BINARY_OP
+ */
+enum class BinaryOpCode : uint8_t {
+    NB_ADD              = 0,
+    NB_AND              = 1,
+    NB_FLOOR_DIVIDE     = 2,
+    NB_LSHIFT           = 3,
+    NB_MATRIX_MULTIPLY  = 4,
+    NB_MULTIPLY         = 5,
+    NB_REMAINDER        = 6,
+    NB_OR               = 7,
+    NB_POWER            = 8,
+    NB_RSHIFT           = 9,
+    NB_SUBTRACT         = 10,
+    NB_TRUE_DIVIDE      = 11,
+    NB_XOR              = 12,
+    // Inplace variants
+    NB_INPLACE_ADD              = 13,
+    NB_INPLACE_AND              = 14,
+    NB_INPLACE_FLOOR_DIVIDE     = 15,
+    NB_INPLACE_LSHIFT           = 16,
+    NB_INPLACE_MATRIX_MULTIPLY  = 17,
+    NB_INPLACE_MULTIPLY         = 18,
+    NB_INPLACE_REMAINDER        = 19,
+    NB_INPLACE_OR               = 20,
+    NB_INPLACE_POWER            = 21,
+    NB_INPLACE_RSHIFT           = 22,
+    NB_INPLACE_SUBTRACT         = 23,
+    NB_INPLACE_TRUE_DIVIDE      = 24,
+    NB_INPLACE_XOR              = 25,
+};
+
+/**
+ * Comparison operation sub-opcodes for COMPARE_OP
+ */
+enum class CompareOpCode : uint8_t {
+    LT = 0,   // <
+    LE = 1,   // <=
+    EQ = 2,   // ==
+    NE = 3,   // !=
+    GT = 4,   // >
+    GE = 5,   // >=
+};
+
+/**
+ * Instruction - represents a single bytecode instruction
+ */
+struct Instruction {
+    Opcode opcode;
+    int32_t arg;        // Argument (if any), -1 if no argument
+    int lineno;         // Source line number
+    int offset;         // Byte offset in bytecode
+    
+    Instruction(Opcode op, int32_t a = -1, int line = 0)
+        : opcode(op), arg(a), lineno(line), offset(0) {}
+    
+    bool has_arg() const {
+        // In Python 3.6+, all instructions are 2 bytes (word-aligned)
+        // Most opcodes have arguments
+        return arg >= 0;
+    }
+    
+    std::string to_string() const;
+};
+
+/**
+ * Get the name of an opcode
+ */
+const char* opcode_name(Opcode op);
+
+/**
+ * Check if opcode has an argument
+ */
+bool opcode_has_arg(Opcode op);
+
+/**
+ * Check if opcode is a jump instruction
+ */
+bool opcode_is_jump(Opcode op);
+
+/**
+ * Check if opcode is a relative jump
+ */
+bool opcode_is_relative_jump(Opcode op);
+
+/**
+ * Get stack effect of an opcode
+ * Returns the change in stack depth after executing the instruction
+ */
+int opcode_stack_effect(Opcode op, int arg = 0);
+
+} // namespace compiler
+} // namespace cpython_cpp
+
+#endif // CPYTHON_CPP_COMPILER_OPCODE_HPP
