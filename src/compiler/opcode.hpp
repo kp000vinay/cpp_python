@@ -37,6 +37,10 @@ enum class Opcode : uint8_t {
     STORE_FAST_LOAD_FAST    = 113,  // Store then load (optimization)
     STORE_FAST_STORE_FAST   = 114,  // Store two locals (optimization)
     
+    // === Python 3.14+ Local Variable Optimizations ===
+    LOAD_FAST_BORROW        = 86,   // Load local without incref (3.14+)
+    LOAD_FAST_BORROW_LOAD_FAST_BORROW = 87, // Load two locals without incref (3.14+)
+    
     // === Global/Name Variables ===
     LOAD_NAME               = 93,   // Load name from namespace
     STORE_NAME              = 116,  // Store name in namespace
@@ -81,6 +85,7 @@ enum class Opcode : uint8_t {
     CONTAINS_OP             = 57,   // Membership check (in/not in)
     
     // === Control Flow - Jumps ===
+    NOT_TAKEN               = 28,   // Branch not taken hint (3.14+)
     JUMP_FORWARD            = 77,   // Jump forward (unconditional)
     JUMP_BACKWARD           = 75,   // Jump backward (unconditional)
     JUMP_BACKWARD_NO_INTERRUPT = 76, // Jump backward without interrupt check
@@ -282,6 +287,8 @@ inline const char* opcode_name(Opcode op) {
         case Opcode::LOAD_FAST_LOAD_FAST: return "LOAD_FAST_LOAD_FAST";
         case Opcode::STORE_FAST_LOAD_FAST: return "STORE_FAST_LOAD_FAST";
         case Opcode::STORE_FAST_STORE_FAST: return "STORE_FAST_STORE_FAST";
+        case Opcode::LOAD_FAST_BORROW: return "LOAD_FAST_BORROW";
+        case Opcode::LOAD_FAST_BORROW_LOAD_FAST_BORROW: return "LOAD_FAST_BORROW_LOAD_FAST_BORROW";
         
         // Global/Name Variables
         case Opcode::LOAD_NAME: return "LOAD_NAME";
@@ -327,6 +334,7 @@ inline const char* opcode_name(Opcode op) {
         case Opcode::CONTAINS_OP: return "CONTAINS_OP";
         
         // Control Flow - Jumps
+        case Opcode::NOT_TAKEN: return "NOT_TAKEN";
         case Opcode::JUMP_FORWARD: return "JUMP_FORWARD";
         case Opcode::JUMP_BACKWARD: return "JUMP_BACKWARD";
         case Opcode::JUMP_BACKWARD_NO_INTERRUPT: return "JUMP_BACKWARD_NO_INTERRUPT";
@@ -454,6 +462,7 @@ inline bool opcode_has_arg(Opcode op) {
         case Opcode::CHECK_EG_MATCH:
         case Opcode::TO_BOOL:
         case Opcode::END_SEND:
+        case Opcode::NOT_TAKEN:
             return false;
         default:
             return true;
@@ -520,6 +529,8 @@ inline int opcode_stack_effect(Opcode op, int arg) {
         case Opcode::LOAD_FAST_LOAD_FAST: return 2;
         case Opcode::STORE_FAST_LOAD_FAST: return 0;
         case Opcode::STORE_FAST_STORE_FAST: return -2;
+        case Opcode::LOAD_FAST_BORROW: return 1;
+        case Opcode::LOAD_FAST_BORROW_LOAD_FAST_BORROW: return 2;
         
         // Global/Name Variables
         case Opcode::LOAD_NAME: return 1;
@@ -562,6 +573,7 @@ inline int opcode_stack_effect(Opcode op, int arg) {
         case Opcode::CONTAINS_OP: return -1;
         
         // Control Flow - Jumps
+        case Opcode::NOT_TAKEN: return 0;
         case Opcode::JUMP_FORWARD: return 0;
         case Opcode::JUMP_BACKWARD: return 0;
         case Opcode::JUMP_BACKWARD_NO_INTERRUPT: return 0;
