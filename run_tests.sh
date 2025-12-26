@@ -80,6 +80,9 @@ declare -a CATEGORIES=(
     "tests/fstrings"
     "tests/generics"
     "tests/tstrings"
+    "tests/with_statements"
+    "tests/async_for"
+    "tests/yield_expressions"
 )
 
 for category in "${CATEGORIES[@]}"; do
