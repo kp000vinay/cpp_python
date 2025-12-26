@@ -167,6 +167,24 @@ async def fetch():
     return 42
 )", "Async Function");
 
+    // Test 21: With statement
+    test_compile(R"(
+with open("file.txt") as f:
+    x = f.read()
+)", "With Statement");
+
+    // Test 22: With statement without as
+    test_compile(R"(
+with open("file.txt"):
+    x = 1
+)", "With Statement (no as)");
+
+    // Test 23: Multiple context managers
+    test_compile(R"(
+with open("a.txt") as a, open("b.txt") as b:
+    data = a.read() + b.read()
+)", "Multiple Context Managers");
+
     std::cout << "=== All tests completed ===\n";
     return 0;
 }

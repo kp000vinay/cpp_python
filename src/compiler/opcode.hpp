@@ -141,7 +141,9 @@ enum class Opcode : uint8_t {
     CHECK_EG_MATCH          = 5,    // Check exception group match
     CLEANUP_THROW           = 7,    // Cleanup after throw
     WITH_EXCEPT_START       = 43,   // Start with exception handling
+    BEFORE_WITH             = 3,    // Setup context manager (calls __enter__)
     END_ASYNC_FOR           = 68,   // End async for loop
+    BEFORE_ASYNC_WITH       = 17,   // Setup async context manager (calls __aenter__)
     
     // === Unpacking ===
     UNPACK_SEQUENCE         = 119,  // Unpack sequence to stack
@@ -390,6 +392,8 @@ inline const char* opcode_name(Opcode op) {
         case Opcode::CHECK_EG_MATCH: return "CHECK_EG_MATCH";
         case Opcode::CLEANUP_THROW: return "CLEANUP_THROW";
         case Opcode::WITH_EXCEPT_START: return "WITH_EXCEPT_START";
+        case Opcode::BEFORE_WITH: return "BEFORE_WITH";
+        case Opcode::BEFORE_ASYNC_WITH: return "BEFORE_ASYNC_WITH";
         case Opcode::END_ASYNC_FOR: return "END_ASYNC_FOR";
         
         // Unpacking
@@ -614,6 +618,9 @@ inline int opcode_stack_effect(Opcode op, int arg) {
         case Opcode::RAISE_VARARGS: return -arg;
         case Opcode::RERAISE: return -1;
         case Opcode::CHECK_EXC_MATCH: return 0;
+        case Opcode::WITH_EXCEPT_START: return 1;
+        case Opcode::BEFORE_WITH: return 1;  // Pushes __exit__ method
+        case Opcode::BEFORE_ASYNC_WITH: return 1;  // Pushes __aexit__ method
         
         // Unpacking
         case Opcode::UNPACK_SEQUENCE: return arg - 1;
