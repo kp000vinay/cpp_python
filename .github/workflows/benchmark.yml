@@ -77,23 +77,25 @@ jobs:
           python benchmarks/benchmark_ci.py --output benchmark_results.json --parser cpp_parser.exe
 
       - name: Display Benchmark Results
+        shell: python
         run: |
-          python -c "
           import json
+          
           with open('benchmark_results.json', 'r') as f:
               results = json.load(f)
           
           print('=' * 70)
           print('PERFORMANCE BENCHMARK RESULTS')
           print('=' * 70)
-          print(f\"Platform: {results['platform']}\")
-          print(f\"Python Version: {results['python_version']}\")
-          print(f\"Timestamp: {results['timestamp']}\")
+          print(f"Platform: {results['platform']}")
+          print(f"Python Version: {results['python_version']}")
+          print(f"Timestamp: {results['timestamp']}")
           print()
           
           print('Test Results:')
           print('-' * 70)
-          print(f\"{'Test Case':<30} {'CPython (ms)':<15} {'cpp_parser (ms)':<15} {'Ratio':<10}\")
+          header = f"{'Test Case':<30} {'CPython (ms)':<15} {'cpp_parser (ms)':<15} {'Ratio':<10}"
+          print(header)
           print('-' * 70)
           
           for test in results['tests']:
@@ -101,15 +103,15 @@ jobs:
               cpython_ms = test['cpython_mean_ms']
               cpp_ms = test['cpp_mean_ms']
               ratio = test['ratio']
-              print(f\"{name:<30} {cpython_ms:<15.3f} {cpp_ms:<15.3f} {ratio:<10.2f}x\")
+              row = f"{name:<30} {cpython_ms:<15.3f} {cpp_ms:<15.3f} {ratio:<10.2f}x"
+              print(row)
           
           print('-' * 70)
           print()
           print('Summary:')
-          print(f\"  Average ratio: {results['summary']['average_ratio']:.2f}x\")
-          print(f\"  cpp_parser is {results['summary']['comparison']}\")
+          print(f"  Average ratio: {results['summary']['average_ratio']:.2f}x")
+          print(f"  cpp_parser is {results['summary']['comparison']}")
           print('=' * 70)
-          "
 
       - name: Upload Benchmark Results
         uses: actions/upload-artifact@v4
@@ -158,8 +160,8 @@ jobs:
           merge-multiple: false
 
       - name: Generate Comparison Report
+        shell: python
         run: |
-          python3 << 'EOF'
           import json
           import os
           
@@ -181,13 +183,14 @@ jobs:
               print('No benchmark results found.')
           else:
               # Print summary for each platform
-              print(f"{'Platform':<20} {'Avg Ratio':<15} {'Status':<20}")
+              header = f"{'Platform':<20} {'Avg Ratio':<15} {'Status':<20}"
+              print(header)
               print('-' * 55)
               for platform, data in results.items():
                   avg_ratio = data['summary']['average_ratio']
                   comparison = data['summary']['comparison']
-                  print(f"{platform:<20} {avg_ratio:<15.2f}x {comparison:<20}")
+                  row = f"{platform:<20} {avg_ratio:<15.2f}x {comparison:<20}"
+                  print(row)
               
               print()
               print('=' * 80)
-          EOF
