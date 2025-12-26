@@ -159,6 +159,8 @@ public:
             compile_with(node);
         } else if (auto* node = dynamic_cast<ast::AsyncWith*>(stmt)) {
             compile_async_with(node);
+        } else if (auto* node = dynamic_cast<ast::TypeAlias*>(stmt)) {
+            compile_typealias(node);
         } else {
             add_error("Unknown statement type", stmt->lineno());
         }
@@ -926,6 +928,102 @@ private:
             emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
             emit(Opcode::SEND, 0);
             emit(Opcode::POP_TOP);
+        }
+    }
+    
+    /**
+     * Compile type alias statement (PEP 695)
+     * 
+     * type Vector = list[int]
+     * type Mapping[K, V] = dict[K, V]
+     * 
+     * Bytecode pattern:
+     *   LOAD_CONST        <alias_name>
+     *   BUILD_TUPLE       0  (or type params if generic)
+     *   LOAD_CONST        <value_expression_code>
+     *   MAKE_FUNCTION     0
+     *   BUILD_TUPLE       3
+     *   CALL_INTRINSIC_1  6  (INTRINSIC_TYPEALIAS)
+     *   STORE_NAME        <alias_name>
+     */
+    void compile_typealias(ast::TypeAlias* node) {
+        // Get the alias name
+        std::string alias_name;
+        if (auto* name_expr = dynamic_cast<ast::Name*>(node->name().get())) {
+            alias_name = name_expr->id();
+        } else {
+            add_error("TypeAlias name must be a simple identifier");
+            return;
+        }
+        
+        // 1. Push the alias name
+        emit(Opcode::LOAD_CONST, code().add_const(alias_name));
+        
+        // 2. Build type parameters tuple
+        if (node->is_generic()) {
+            // Compile each type parameter
+            for (const auto& param : node->type_params()) {
+                // Type parameters are TypeVar, ParamSpec, or TypeVarTuple
+                // Get the name from the concrete type
+                std::string param_name;
+                if (auto* tv = dynamic_cast<ast::TypeVar*>(param.get())) {
+                    param_name = tv->name();
+                } else if (auto* ps = dynamic_cast<ast::ParamSpec*>(param.get())) {
+                    param_name = ps->name();
+                } else if (auto* tvt = dynamic_cast<ast::TypeVarTuple*>(param.get())) {
+                    param_name = tvt->name();
+                }
+                emit(Opcode::LOAD_CONST, code().add_const(param_name));
+            }
+            emit(Opcode::BUILD_TUPLE, static_cast<int>(node->type_params().size()));
+        } else {
+            // Empty tuple for non-generic type alias
+            emit(Opcode::BUILD_TUPLE, 0);
+        }
+        
+        // 3. Create a function that returns the type value (for lazy evaluation)
+        // Create a nested code object for the type alias value
+        auto value_code = std::make_shared<CodeObject>(
+            "<type alias value>",
+            code().co_filename,
+            node->lineno()
+        );
+        
+        // Save current scope and push new scope for value code
+        push_scope(ScopeType::Function, "<type alias value>");
+        // Replace the code object with our custom one
+        current_scope().code = value_code;
+        
+        // Compile the value expression
+        compile_expr(node->value().get());
+        emit(Opcode::RETURN_VALUE);
+        
+        // Pop the value scope
+        pop_scope();
+        
+        // Push the code object as a constant in parent scope
+        int code_idx = code().add_const(value_code);
+        emit(Opcode::LOAD_CONST, code_idx);
+        
+        // Make function from the code object
+        emit(Opcode::MAKE_FUNCTION, 0);
+        
+        // 4. Build tuple of (name, type_params, value_func)
+        emit(Opcode::BUILD_TUPLE, 3);
+        
+        // 5. Call INTRINSIC_TYPEALIAS (intrinsic index 6)
+        emit(Opcode::CALL_INTRINSIC_1, 6);
+        
+        // 6. Store the result
+        int name_idx = code().add_name(alias_name);
+        if (current_scope().type == ScopeType::Module) {
+            emit(Opcode::STORE_NAME, name_idx);
+        } else if (current_scope().type == ScopeType::Class) {
+            emit(Opcode::STORE_NAME, name_idx);
+        } else {
+            // In function scope, store as fast local
+            int local_idx = code().add_varname(alias_name);
+            emit(Opcode::STORE_FAST, local_idx);
         }
     }
     
