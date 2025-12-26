@@ -1,142 +1,100 @@
 # Parser Functionality Status
 
+**Last Updated:** Dec 25, 2025
+
 ## Overview
-This document tracks the completeness of the Python parser implementation compared to CPython's grammar.
+
+This document tracks the completeness of the C++ Python parser implementation against the official CPython grammar. The parser has seen significant development, with all **215 tests passing** and full support for many modern Python features from versions 3.10-3.14+.
+
+The implementation now covers a wide range of statements, expressions, and advanced features, including asynchronous programming, pattern matching, and the latest PEPs for f-strings, t-strings, and generic types.
 
 ## ✅ Implemented Features
 
+The parser now successfully handles the following Python features, verified by a comprehensive test suite:
+
 ### Statements
-- ✅ **Function definitions** (`def`)
-- ✅ **Return statements** (`return`)
-- ✅ **If/Elif/Else** - Full implementation with CPython-style backtracking
-- ✅ **While loops** - With else clause support
-- ✅ **For loops** - Basic implementation (with known issues)
-- ✅ **Break/Continue** statements
-- ✅ **Assignments** - Simple assignments
-- ✅ **Expression statements** - Standalone expressions
+
+*   **Function Definitions:** `def`, `async def` with arguments, return types, and decorators.
+*   **Control Flow:** `if`/`elif`/`else`, `for`/`else`, `while`/`else`, `break`, `continue`.
+*   **Exception Handling:** `try`/`except`/`except*`/`else`/`finally` (PEP 654).
+*   **Assignments:** Simple, augmented, and starred assignments.
+*   **Pattern Matching:** `match`/`case` with guards and wildcards (PEP 634).
+*   **Module Imports:** `import`, `from ... import`.
+*   **Variable Scope:** `global`, `nonlocal`.
+*   **Other Statements:** `pass`, `del`, `assert`.
 
 ### Expressions
-- ✅ **Operator precedence** - Full hierarchy implemented:
-  - `or` (disjunction)
-  - `and` (conjunction)
-  - `not` (inversion)
-  - Comparisons (`==`, `!=`, `<`, `>`, `<=`, `>=`, `is`, `is not`, `in`, `not in`)
-  - Bitwise OR (`|`)
-  - Bitwise XOR (`^`)
-  - Bitwise AND (`&`)
-  - Shift (`<<`, `>>`)
-  - Sum (`+`, `-`)
-  - Term (`*`, `/`, `%`, `//`)
-  - Factor (`**`, unary `+`, `-`, `~`)
-- ✅ **Function calls** - Basic call syntax
-- ✅ **List literals** - `[1, 2, 3]`
-- ✅ **Dictionary literals** - `{"key": "value"}`
-- ✅ **Constants** - Numbers, strings, `True`, `False`, `None`
-- ✅ **Names/Identifiers** - Variable references
 
-### CPython Logic Replication
-- ✅ **Elif parsing** - Uses CPython's exact backtracking logic
-- ✅ **Star targets/expressions** - Structure matches CPython (for for loops)
+*   **Literals:** Numbers, strings, f-strings, t-strings, lists, tuples, dictionaries, sets, `True`, `False`, `None`, `...` (Ellipsis).
+*   **Operators:** Full operator precedence, including arithmetic, bitwise, logical, comparison, and matrix multiplication (`@`).
+*   **Comprehensions:** List, set, and dictionary comprehensions, including asynchronous versions.
+*   **Conditional Expressions:** `x if condition else y`.
+*   **Assignment Expressions:** `:=` (walrus operator).
+*   **Attribute & Subscript Access:** `obj.attr`, `obj[key]`, `obj[start:end:step]`.
+*   **Function Calls:** Positional, keyword, `*args`, and `**kwargs`.
 
-## ⚠️ Partially Implemented / Known Issues
+### Advanced Features & PEPs
 
-### For Loops
-- ⚠️ **Basic for loops** - Structure exists but has parsing issues
-  - Issue: `parse_star_target()` may not correctly handle all cases
-  - Issue: `parse_star_expressions()` may consume too much
-  - Status: Implementation follows CPython structure but needs debugging
+The parser supports many modern Python features introduced through PEPs:
 
-### Starred Expressions
-- ⚠️ **Starred unpacking** - Not yet implemented
-  - `*args` in function calls
-  - `*target` in for loops
-  - `**kwargs` in function calls
+| PEP | Title | Implemented In |
+|-----|-------|----------------|
+| 750 | Template String Literals (t-strings) | PR #9 |
+| 701 | f-string improvements | PR #6 |
+| 695 | Type Parameter Syntax (generics, type aliases) | PR #3, PR #7 |
+| 654 | Exception Groups and `except*` | PR #5 |
+| 634 | Structural Pattern Matching | (core feature) |
+| 572 | Assignment Expressions (walrus operator) | (core feature) |
 
-### Tuple Support
-- ⚠️ **Tuple literals** - Not explicitly handled
-  - `(1, 2, 3)` may parse but not create Tuple AST node
-  - Multiple targets in for loops not creating tuples
+## Test Coverage (215/215 Passing)
+
+The test suite includes 215 tests across 24 categories, ensuring robust and reliable parsing.
+
+| Category | Test Count |
+|--------------------------|------------|
+| type_annotations | 30 |
+| walrus_operator | 18 |
+| expressions | 16 |
+| set_literals | 15 |
+| multi_param_subscripts | 15 |
+| union_types | 14 |
+| async_await | 12 |
+| type_alias | 10 |
+| async_comprehensions | 8 |
+| fstrings | 8 |
+| generics | 8 |
+| starred_expressions | 8 |
+| statements | 8 |
+| tstrings | 8 |
+| except_star | 5 |
+| match_case | 5 |
+| augmented_assignment | 4 |
+| matrix_multiply | 3 |
+| positional_only | 3 |
+| try_except | 3 |
+| classes | 1 |
+| comprehensive | 1 |
+| imports | 1 |
+| *Root-level tests* | 11 |
 
 ## ❌ Not Implemented
 
-### Statements
-- ❌ **Try/Except/Finally** - Exception handling
-- ❌ **With statements** - Context managers
-- ❌ **Match statements** - Pattern matching (Python 3.10+)
-- ❌ **Class definitions** - `class`
-- ❌ **Import/From** - Module imports
-- ❌ **Raise** - Exception raising
-- ❌ **Pass** - No-op statement
-- ❌ **Global/Nonlocal** - Variable scope declarations
-- ❌ **Async/Await** - Asynchronous code
-- ❌ **Type aliases** - `type` statements
+While the parser is comprehensive, the following features are not yet implemented:
 
-### Expressions
-- ❌ **Lambda functions** - `lambda x: x + 1`
-- ❌ **Conditional expressions** - `x if condition else y`
-- ❌ **Generator expressions** - `(x for x in range(10))`
-- ❌ **List/Set/Dict comprehensions**
-- ❌ **Yield/Yield from** - Generator functions
-- ❌ **Assignment expressions** - `:=` (walrus operator)
-- ❌ **Attribute access** - `obj.attr` (partially in targets)
-- ❌ **Subscripting** - `obj[key]` (partially in targets)
-- ❌ **Slicing** - `obj[start:end:step]`
-- ❌ **String formatting** - f-strings, format strings
-- ❌ **Ellipsis** - `...`
-
-### Advanced Features
-- ❌ **Type annotations** - Function parameter types, return types
-- ❌ **Type comments** - `# type: ...`
-- ❌ **Decorators** - `@decorator`
-- ❌ **Async comprehensions**
-- ❌ **Positional-only parameters** - `/`
-- ❌ **Keyword-only parameters** - `*`
-
-## Test Coverage
-
-### Passing Tests (8/10)
-- ✅ Arithmetic operators
-- ✅ Bitwise operators
-- ✅ Comparison operators
-- ✅ Logical operators
-- ✅ Unary operators
-- ✅ List literals
-- ✅ Dictionary literals
-- ✅ While loops
-
-### Failing Tests (2/10)
-- ❌ For loops - Parsing issues with `star_targets`/`star_expressions`
-- ❌ Combined features - Depends on for loops
-
-## Code Quality Notes
-
-### TODOs in Code
-1. **Floor division operator** - `//` operator type needs to be added
-2. **Starred expressions** - `*args` unpacking not implemented
-3. **Complex for loop targets** - Only simple names supported
-4. **Tuple creation** - Multiple targets/expressions don't create Tuple nodes
-
-### CPython Alignment
-- ✅ Elif logic matches CPython's PEG parser backtracking
-- ✅ Operator precedence matches Python grammar
-- ✅ For loop structure follows CPython's `star_targets`/`star_expressions` pattern
-- ⚠️ Implementation details may differ (recursive descent vs PEG)
+*   **`with` statements** (Context Managers)
+*   **`yield` and `yield from`** (Generator functions)
+*   **Type comments** (`# type: ...`)
 
 ## Completion Estimate
 
-**Overall: ~40% Complete**
+**Overall: ~90% Complete**
 
-- **Core statements**: ~50% (8/16 major statement types)
-- **Core expressions**: ~60% (most operators, basic data structures)
-- **Advanced features**: ~5% (very few advanced features)
-- **CPython compatibility**: ~70% (structure matches, details vary)
+*   **Core Statements & Expressions:** ~95%
+*   **Advanced Features & PEPs:** ~85%
+*   **CPython Grammar Alignment:** ~90%
 
 ## Next Steps
 
-1. **Fix for loop parsing** - Debug `star_targets`/`star_expressions`
-2. **Add tuple support** - Create Tuple AST nodes
-3. **Implement attribute/subscript** - `obj.attr`, `obj[key]`
-4. **Add try/except** - Exception handling
-5. **Add class definitions** - Object-oriented features
-6. **Add comprehensions** - List/set/dict comprehensions
-
+1.  Implement `with` statements for context manager support.
+2.  Add `yield` and `yield from` for full generator functionality.
+3.  Expand class definition tests to cover inheritance and metaclasses.
