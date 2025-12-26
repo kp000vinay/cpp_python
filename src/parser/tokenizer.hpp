@@ -57,8 +57,10 @@ enum class TokenType {
 
     // F-string tokens
     FSTRING_START, FSTRING_MIDDLE, FSTRING_END,
-    // Special token for f-string conversion specifier
-    EXCLAIM  // ! in f-strings (for !s, !r, !a)
+    // T-string tokens (PEP 750)
+    TSTRING_START, TSTRING_MIDDLE, TSTRING_END,
+    // Special token for f-string/t-string conversion specifier
+    EXCLAIM  // ! in f-strings/t-strings (for !s, !r, !a)
 };
 
 // Compile-time token tag for type-safe operations
@@ -168,6 +170,20 @@ private:
     };
     std::vector<FStringState> fstring_stack_;  // Stack for nested f-strings
 
+    // T-string state tracking (PEP 750)
+    struct TStringState {
+        char quote;           // ' or "
+        int quote_size;       // 1 for single quote, 3 for triple quote
+        int curly_brace_depth; // Track nesting depth for expressions
+        int curly_brace_expr_start_depth; // Depth when expression started
+        int paren_depth;      // Track ( ) nesting inside expressions
+        int bracket_depth;    // Track [ ] nesting inside expressions
+        bool in_format_spec;  // Are we currently in a format specifier?
+        bool has_format_spec; // Have we seen : at the top-level expression?
+        size_t expr_start_pos; // Position where current expression started (for capturing expr text)
+    };
+    std::vector<TStringState> tstring_stack_;  // Stack for nested t-strings
+
     void skip_whitespace();
     void skip_comment();
     Token read_number();
@@ -180,6 +196,11 @@ private:
     Token read_fstring_start();
     Token read_fstring_middle();
     Token read_fstring_end();
+
+    // T-string lexing functions (PEP 750)
+    Token read_tstring_start();
+    Token read_tstring_middle();
+    Token read_tstring_end();
 };
 
 // ============================================================================
@@ -721,6 +742,209 @@ inline Token Tokenizer::read_fstring_end() {
     return Token(TokenType::FSTRING_END, "", line_, start_col);
 }
 
+// ============================================================================
+// T-string lexing functions (PEP 750)
+// ============================================================================
+
+inline Token Tokenizer::read_tstring_start() {
+    size_t start_col = column_;
+
+    // Consume t/T prefix
+    if (position_ < source_.length() &&
+        (source_[position_] == 't' || source_[position_] == 'T')) {
+        position_++;
+        column_++;
+    } else {
+        return Token(TokenType::ENDMARKER, "", line_, start_col);
+    }
+
+    // Determine quote and quote size
+    char quote = source_[position_];
+    int quote_size = 1;
+
+    // Check for triple quotes
+    if (position_ + 2 < source_.length() &&
+        source_[position_] == source_[position_ + 1] &&
+        source_[position_] == source_[position_ + 2]) {
+        quote_size = 3;
+        position_ += 3;
+        column_ += 3;
+    } else {
+        position_++;
+        column_++;
+    }
+
+    // Push t-string state
+    TStringState state;
+    state.quote = quote;
+    state.quote_size = quote_size;
+    state.curly_brace_depth = 0;
+    state.curly_brace_expr_start_depth = -1;
+    state.paren_depth = 0;
+    state.bracket_depth = 0;
+    state.in_format_spec = false;
+    state.has_format_spec = false;
+    state.expr_start_pos = 0;
+    tstring_stack_.push_back(state);
+
+    // Read initial string content until { or end quote
+    std::string value;
+    bool escaped = false;
+
+    while (position_ < source_.length()) {
+        char c = source_[position_];
+
+        // Check for end quote
+        if (!escaped && c == quote) {
+            bool is_closing = true;
+            for (int i = 0; i < quote_size; i++) {
+                if (position_ + i >= source_.length() ||
+                    source_[position_ + i] != quote) {
+                    is_closing = false;
+                    break;
+                }
+            }
+            if (is_closing) {
+                break;
+            }
+        }
+
+        // Check for { (start of expression)
+        if (!escaped && c == '{') {
+            if (position_ + 1 < source_.length() && source_[position_ + 1] == '{') {
+                value += '{';
+                position_ += 2;
+                column_ += 2;
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        // Handle escape sequences
+        if (escaped) {
+            value += c;
+            escaped = false;
+            position_++;
+            column_++;
+        } else if (c == '\\') {
+            escaped = true;
+            position_++;
+            column_++;
+        } else {
+            value += c;
+            position_++;
+            if (c == '\n') {
+                line_++;
+                column_ = 1;
+            } else {
+                column_++;
+            }
+        }
+    }
+
+    return Token(TokenType::TSTRING_START, value, line_, start_col);
+}
+
+inline Token Tokenizer::read_tstring_middle() {
+    if (tstring_stack_.empty()) {
+        return Token(TokenType::ENDMARKER, "", line_, column_);
+    }
+
+    TStringState& state = tstring_stack_.back();
+    size_t start_col = column_;
+    std::string value;
+    bool escaped = false;
+
+    while (position_ < source_.length()) {
+        char c = source_[position_];
+
+        // Check for end quote (only when not in expression)
+        if (state.curly_brace_depth == 0 && !escaped && c == state.quote) {
+            bool is_closing = true;
+            for (int i = 0; i < state.quote_size; i++) {
+                if (position_ + i >= source_.length() ||
+                    source_[position_ + i] != state.quote) {
+                    is_closing = false;
+                    break;
+                }
+            }
+            if (is_closing) {
+                break;
+            }
+        }
+
+        // Check for { (start of expression)
+        if (!escaped && c == '{') {
+            if (position_ + 1 < source_.length() && source_[position_ + 1] == '{') {
+                value += '{';
+                position_ += 2;
+                column_ += 2;
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        // Check for } (end of expression or format spec)
+        if (!escaped && c == '}') {
+            if (position_ + 1 < source_.length() && source_[position_ + 1] == '}') {
+                value += '}';
+                position_ += 2;
+                column_ += 2;
+                continue;
+            } else {
+                break;
+            }
+        }
+
+        // Handle escape sequences
+        if (escaped) {
+            value += c;
+            escaped = false;
+            position_++;
+            column_++;
+        } else if (c == '\\') {
+            escaped = true;
+            position_++;
+            column_++;
+        } else {
+            value += c;
+            position_++;
+            if (c == '\n') {
+                line_++;
+                column_ = 1;
+            } else {
+                column_++;
+            }
+        }
+    }
+
+    return Token(TokenType::TSTRING_MIDDLE, value, line_, start_col);
+}
+
+inline Token Tokenizer::read_tstring_end() {
+    if (tstring_stack_.empty()) {
+        return Token(TokenType::ENDMARKER, "", line_, column_);
+    }
+
+    TStringState& state = tstring_stack_.back();
+    size_t start_col = column_;
+
+    // Consume closing quote
+    for (int i = 0; i < state.quote_size; i++) {
+        if (position_ < source_.length() && source_[position_] == state.quote) {
+            position_++;
+            column_++;
+        }
+    }
+
+    // Pop t-string state
+    tstring_stack_.pop_back();
+
+    return Token(TokenType::TSTRING_END, "", line_, start_col);
+}
+
 inline Token Tokenizer::next_token() {
     skip_whitespace();
     skip_comment();
@@ -845,17 +1069,130 @@ inline Token Tokenizer::next_token() {
         }
     }
 
-    // Numbers (checked after f-string to allow format specs like "0>5")
+    // Check if we're in a t-string (PEP 750) - similar to f-string handling
+    if (!tstring_stack_.empty()) {
+        TStringState& state = tstring_stack_.back();
+
+        // Check for closing quote when NOT inside an expression
+        if (state.curly_brace_depth == 0 && c == state.quote) {
+            bool is_closing = true;
+            for (int i = 0; i < state.quote_size; i++) {
+                if (position_ + i >= source_.length() ||
+                    source_[position_ + i] != state.quote) {
+                    is_closing = false;
+                    break;
+                }
+            }
+            if (is_closing) {
+                return read_tstring_end();
+            }
+        }
+
+        // Check for { - start of interpolation (unless {{)
+        if (c == '{') {
+            if (position_ + 1 < source_.length() && source_[position_ + 1] == '{') {
+                // Literal {{ - handled in read_tstring_middle
+                return read_tstring_middle();
+            } else {
+                // Start of interpolation - increment depth and emit LBRACE
+                if (state.in_format_spec) {
+                    // Nested expression in format spec - exit format spec mode
+                    state.in_format_spec = false;
+                }
+                if (state.curly_brace_depth == 0) {
+                    // This is the start of a new top-level expression
+                    state.curly_brace_expr_start_depth = 0;
+                    // Reset bracket tracking for new interpolation
+                    state.paren_depth = 0;
+                    state.bracket_depth = 0;
+                    state.expr_start_pos = position_ + 1;  // Track where expression starts
+                }
+                state.curly_brace_depth++;
+                position_++;
+                column_++;
+                return Token(TokenType::LBRACE, "{", line_, start_col);
+            }
+        }
+
+        // Check for } - end of interpolation (if depth matches and brackets are balanced)
+        if (c == '}') {
+            // Check for literal }} - only when NOT inside an interpolation (depth == 0)
+            if (state.curly_brace_depth == 0 && 
+                position_ + 1 < source_.length() && source_[position_ + 1] == '}') {
+                // Literal }} - handled in read_tstring_middle
+                return read_tstring_middle();
+            } else if (state.curly_brace_depth > 0) {
+                // Only close interpolation if brackets are balanced
+                if (state.paren_depth == 0 && state.bracket_depth == 0) {
+                    // End of interpolation - decrement depth and emit RBRACE
+                    state.curly_brace_depth--;
+                    if (state.curly_brace_depth == 0) {
+                        // End of top-level expression
+                        state.in_format_spec = false;
+                        state.has_format_spec = false;
+                        state.curly_brace_expr_start_depth = -1;
+                    } else if (state.has_format_spec && 
+                               state.curly_brace_depth - 1 == state.curly_brace_expr_start_depth) {
+                        // We're back at the format spec level after a nested expression
+                        state.in_format_spec = true;
+                    }
+                    position_++;
+                    column_++;
+                    return Token(TokenType::RBRACE, "}", line_, start_col);
+                }
+                // This } is part of a dict literal - fall through to normal tokenization
+            } else {
+                // Unmatched }
+                position_++;
+                column_++;
+                return Token(TokenType::RBRACE, "}", line_, start_col);
+            }
+        }
+
+        // Check for : at the expression start depth (format specifier)
+        // Only treat as format spec if brackets are balanced
+        if (c == ':' && state.curly_brace_depth > 0 && 
+            state.curly_brace_depth - 1 == state.curly_brace_expr_start_depth &&
+            state.paren_depth == 0 && state.bracket_depth == 0) {
+            // This is the format specifier colon
+            state.in_format_spec = true;
+            state.has_format_spec = true;  // Remember we've seen :
+            position_++;
+            column_++;
+            return Token(TokenType::COLON, ":", line_, start_col);
+        }
+
+        // If we're inside an expression (depth > 0) and NOT in format spec, tokenize normally
+        // Otherwise, read t-string middle (literal text)
+        if (state.curly_brace_depth > 0 && !state.in_format_spec) {
+            // Track parentheses and brackets for proper nesting
+            if (c == '(') {
+                state.paren_depth++;
+            } else if (c == ')') {
+                if (state.paren_depth > 0) state.paren_depth--;
+            } else if (c == '[') {
+                state.bracket_depth++;
+            } else if (c == ']') {
+                if (state.bracket_depth > 0) state.bracket_depth--;
+            }
+            // Fall through to normal tokenization
+        } else {
+            return read_tstring_middle();
+        }
+    }
+
+    // Numbers (checked after f-string/t-string to allow format specs like "0>5")
     if (std::isdigit(c)) {
         return read_number();
     }
 
     // Check for f-string prefix before quote
-    // Peek ahead to see if we have f/F/rf/fr before a quote
-    if ((c == 'f' || c == 'F' || c == 'r' || c == 'R') && position_ + 1 < source_.length()) {
+    // Peek ahead to see if we have f/F/rf/fr or t/T before a quote
+    if ((c == 'f' || c == 'F' || c == 'r' || c == 'R' || c == 't' || c == 'T') && position_ + 1 < source_.length()) {
         size_t peek_pos = position_;
         bool is_raw = false;
         bool has_f = false;
+        bool has_t = false;
 
         // Check for r/R
         if (source_[peek_pos] == 'r' || source_[peek_pos] == 'R') {
@@ -874,11 +1211,26 @@ inline Token Tokenizer::next_token() {
             peek_pos++;
         }
 
+        // Check for t/T (t-string prefix)
+        if (!has_f && peek_pos < source_.length() &&
+            (source_[peek_pos] == 't' || source_[peek_pos] == 'T')) {
+            has_t = true;
+            peek_pos++;
+        } else if (!has_f && !is_raw && (c == 't' || c == 'T')) {
+            has_t = true;
+            peek_pos = position_ + 1;
+        }
+
         // Check if we have a quote after the prefix
         if (has_f && peek_pos < source_.length() &&
             (source_[peek_pos] == '"' || source_[peek_pos] == '\'')) {
             // We have an f-string - read the start
             return read_fstring_start();
+        }
+        if (has_t && peek_pos < source_.length() &&
+            (source_[peek_pos] == '"' || source_[peek_pos] == '\'')) {
+            // We have a t-string - read the start
+            return read_tstring_start();
         }
     }
 
@@ -997,8 +1349,9 @@ inline Token Tokenizer::next_token() {
                 position_++; column_++;
                 return Token(TokenType::NOT_EQUAL, "!=", line_, start_col);
             }
-            // In f-string expression context, ! is for conversion specifiers (!s, !r, !a)
-            if (!fstring_stack_.empty() && fstring_stack_.back().curly_brace_depth > 0) {
+            // In f-string/t-string expression context, ! is for conversion specifiers (!s, !r, !a)
+            if ((!fstring_stack_.empty() && fstring_stack_.back().curly_brace_depth > 0) ||
+                (!tstring_stack_.empty() && tstring_stack_.back().curly_brace_depth > 0)) {
                 return Token(TokenType::EXCLAIM, "!", line_, start_col);
             }
             // Standalone ! is not valid in Python (only != is valid)

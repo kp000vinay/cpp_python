@@ -882,6 +882,47 @@ private:
     std::vector<std::shared_ptr<Expr>> values_;  // Alternating Constant (strings) and FormattedValue
 };
 
+// Interpolation - represents an interpolated expression within a t-string (PEP 750)
+class Interpolation : public ASTNodeBase {
+public:
+    Interpolation(std::shared_ptr<Expr> value,
+                  const std::string& expr_str,
+                  int conversion,
+                  std::shared_ptr<Expr> format_spec,
+                  int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset),
+          value_(value),
+          expr_str_(expr_str),
+          conversion_(conversion),
+          format_spec_(format_spec) {}
+
+    std::shared_ptr<Expr> value() const { return value_; }
+    const std::string& expr_str() const { return expr_str_; }
+    int conversion() const { return conversion_; }
+    std::shared_ptr<Expr> format_spec() const { return format_spec_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::shared_ptr<Expr> value_;
+    std::string expr_str_;
+    int conversion_;
+    std::shared_ptr<Expr> format_spec_;
+};
+
+// TemplateStr - represents a template string literal (t-string, PEP 750)
+class TemplateStr : public ASTNodeBase {
+public:
+    TemplateStr(std::vector<std::shared_ptr<Expr>> values,
+                int lineno, int col_offset)
+        : ASTNodeBase(lineno, col_offset), values_(std::move(values)) {}
+
+    const std::vector<std::shared_ptr<Expr>>& values() const { return values_; }
+    std::string to_string(int indent = 0) const override;
+
+private:
+    std::vector<std::shared_ptr<Expr>> values_;
+};
+
 inline std::string FormattedValue::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "FormattedValue(\n";
@@ -913,6 +954,49 @@ inline std::string FormattedValue::to_string(int indent) const {
 inline std::string JoinedStr::to_string(int indent) const {
     std::ostringstream oss;
     oss << indent_str(indent) << "JoinedStr(\n";
+    oss << indent_str(indent + 1) << "values=[\n";
+    for (size_t i = 0; i < values_.size(); ++i) {
+        oss << values_[i]->to_string(indent + 2);
+        if (i < values_.size() - 1) oss << ",";
+        oss << "\n";
+    }
+    oss << indent_str(indent + 1) << "]\n";
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string Interpolation::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "Interpolation(\n";
+    oss << indent_str(indent + 1) << "value=\n";
+    oss << value_->to_string(indent + 2) << ",\n";
+    oss << indent_str(indent + 1) << "str=\"" << expr_str_ << "\",\n";
+    oss << indent_str(indent + 1) << "conversion=";
+    if (conversion_ == -1) {
+        oss << "-1 (none)";
+    } else if (conversion_ == 115) {
+        oss << "115 ('s')";
+    } else if (conversion_ == 114) {
+        oss << "114 ('r')";
+    } else if (conversion_ == 97) {
+        oss << "97 ('a')";
+    } else {
+        oss << conversion_;
+    }
+    oss << ",\n";
+    if (format_spec_) {
+        oss << indent_str(indent + 1) << "format_spec=\n";
+        oss << format_spec_->to_string(indent + 2) << "\n";
+    } else {
+        oss << indent_str(indent + 1) << "format_spec=None\n";
+    }
+    oss << indent_str(indent) << ")";
+    return oss.str();
+}
+
+inline std::string TemplateStr::to_string(int indent) const {
+    std::ostringstream oss;
+    oss << indent_str(indent) << "TemplateStr(\n";
     oss << indent_str(indent + 1) << "values=[\n";
     for (size_t i = 0; i < values_.size(); ++i) {
         oss << values_[i]->to_string(indent + 2);
