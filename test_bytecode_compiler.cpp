@@ -261,6 +261,21 @@ result = [[y for y in x] for x in matrix]
 result = sum(x * 2 for x in range(10))
 )", "Generator Expression");
 
+    // Test 36: Simple type alias
+    test_compile(R"(
+type Vector = list[int]
+)", "Simple Type Alias");
+
+    // Test 37: Generic type alias
+    test_compile(R"(
+type Mapping[K, V] = dict[K, V]
+)", "Generic Type Alias");
+
+    // Test 38: Type alias with union
+    test_compile(R"(
+type Number = int | float
+)", "Type Alias with Union");
+
     std::cout << "=== All tests completed ===\n";
     return 0;
 }
