@@ -153,6 +153,10 @@ public:
             compile_delete(node);
         } else if (auto* node = dynamic_cast<ast::Match*>(stmt)) {
             compile_match(node);
+        } else if (auto* node = dynamic_cast<ast::With*>(stmt)) {
+            compile_with(node);
+        } else if (auto* node = dynamic_cast<ast::AsyncWith*>(stmt)) {
+            compile_async_with(node);
         } else {
             add_error("Unknown statement type", stmt->lineno());
         }
@@ -716,6 +720,113 @@ private:
         }
         
         emit(Opcode::POP_TOP);
+    }
+    
+    /**
+     * Compile a with statement (context manager)
+     * 
+     * Python: with EXPR as VAR:
+     *             BODY
+     * 
+     * Bytecode pattern:
+     *   EXPR                    # Evaluate context expression
+     *   BEFORE_WITH             # Call __enter__, push __exit__
+     *   STORE VAR               # Store result of __enter__ (if 'as' clause)
+     *   BODY                    # Execute body
+     *   LOAD_CONST None         # Normal exit: call __exit__(None, None, None)
+     *   LOAD_CONST None
+     *   LOAD_CONST None
+     *   CALL 2
+     *   POP_TOP
+     *   JUMP cleanup
+     * exception_handler:
+     *   PUSH_EXC_INFO           # Exception: call __exit__(exc_type, exc_val, exc_tb)
+     *   WITH_EXCEPT_START
+     *   POP_JUMP_IF_TRUE suppress
+     *   RERAISE
+     * suppress:
+     *   POP_TOP
+     *   POP_EXCEPT
+     *   POP_TOP
+     *   POP_TOP
+     * cleanup:
+     */
+    void compile_with(ast::With* node) {
+        // For simplicity, we compile a basic version without full exception handling
+        // A complete implementation would need exception table support
+        
+        for (const auto& item : node->items()) {
+            // Evaluate context expression
+            compile_expr(item.context_expr.get());
+            
+            // BEFORE_WITH: calls __enter__ and pushes __exit__ for later
+            emit(Opcode::BEFORE_WITH);
+            
+            // Store the result of __enter__ if there's an 'as' clause
+            if (item.optional_vars) {
+                compile_store_target(item.optional_vars.get());
+            } else {
+                emit(Opcode::POP_TOP);
+            }
+        }
+        
+        // Compile the body
+        for (const auto& stmt : node->body()) {
+            compile_stmt(stmt.get());
+        }
+        
+        // Normal exit: call __exit__(None, None, None) for each context manager (reverse order)
+        for (size_t i = node->items().size(); i > 0; --i) {
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));  // None
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));  // None
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));  // None
+            emit(Opcode::CALL, 2);  // Call __exit__ with 3 args (2 on stack after callable)
+            emit(Opcode::POP_TOP);  // Discard __exit__ return value
+        }
+    }
+    
+    /**
+     * Compile an async with statement
+     * 
+     * Similar to with statement but uses __aenter__ and __aexit__
+     * and requires await on both calls.
+     */
+    void compile_async_with(ast::AsyncWith* node) {
+        for (const auto& item : node->items()) {
+            // Evaluate context expression
+            compile_expr(item.context_expr.get());
+            
+            // BEFORE_ASYNC_WITH: calls __aenter__ and pushes __aexit__
+            emit(Opcode::BEFORE_ASYNC_WITH);
+            emit(Opcode::GET_AWAITABLE, 1);
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
+            emit(Opcode::SEND, 0);  // Will be patched
+            emit(Opcode::POP_TOP);
+            
+            // Store the result of __aenter__ if there's an 'as' clause
+            if (item.optional_vars) {
+                compile_store_target(item.optional_vars.get());
+            } else {
+                emit(Opcode::POP_TOP);
+            }
+        }
+        
+        // Compile the body
+        for (const auto& stmt : node->body()) {
+            compile_stmt(stmt.get());
+        }
+        
+        // Normal exit: call __aexit__(None, None, None) for each context manager
+        for (size_t i = node->items().size(); i > 0; --i) {
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));  // None
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));  // None
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));  // None
+            emit(Opcode::CALL, 2);
+            emit(Opcode::GET_AWAITABLE, 2);
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
+            emit(Opcode::SEND, 0);
+            emit(Opcode::POP_TOP);
+        }
     }
     
     // === Expression Compilation ===
