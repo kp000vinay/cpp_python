@@ -125,6 +125,8 @@ public:
             compile_while(node);
         } else if (auto* node = dynamic_cast<ast::For*>(stmt)) {
             compile_for(node);
+        } else if (auto* node = dynamic_cast<ast::AsyncFor*>(stmt)) {
+            compile_async_for(node);
         } else if (auto* node = dynamic_cast<ast::TryStar*>(stmt)) {
             compile_try_star(node);
         } else if (auto* node = dynamic_cast<ast::Try*>(stmt)) {
@@ -502,6 +504,96 @@ private:
             }
         }
         
+        auto& loop_info = current_scope().loops.top();
+        for (int idx : loop_info.break_patches) {
+            patch_jump(idx);
+        }
+        
+        current_scope().loops.pop();
+    }
+    
+    /**
+     * Compile an async for loop
+     * 
+     * Python: async for TARGET in ITER:
+     *             BODY
+     *         else:
+     *             ORELSE
+     * 
+     * Bytecode pattern (CPython 3.11+):
+     *   ITER                    # Evaluate async iterable
+     *   GET_AITER               # Get async iterator
+     * loop_start:
+     *   GET_ANEXT               # Get next awaitable
+     *   LOAD_CONST None
+     *   SEND to_store           # Await the next value
+     *   YIELD_VALUE             # Yield control
+     *   RESUME 3
+     *   JUMP_BACKWARD to SEND
+     * to_store:
+     *   STORE TARGET            # Store the value
+     *   BODY                    # Execute body
+     *   JUMP_BACKWARD loop_start
+     * end:
+     *   END_ASYNC_FOR           # Cleanup async iterator
+     *   ORELSE                  # Execute else clause (if any)
+     */
+    void compile_async_for(ast::AsyncFor* node) {
+        // Evaluate the async iterable
+        compile_expr(node->iter().get());
+        
+        // GET_AITER: Get async iterator from the iterable
+        emit(Opcode::GET_AITER);
+        
+        // Mark the start of the loop
+        int loop_start = code().current_offset();
+        
+        // Push loop context for break/continue handling
+        current_scope().loops.push({loop_start, {}, {}});
+        
+        // GET_ANEXT: Get next awaitable from async iterator
+        emit(Opcode::GET_ANEXT);
+        
+        // Load None for SEND
+        emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
+        
+        // SEND: Await the next value (jumps to store on completion)
+        int send_jump = emit_jump(Opcode::SEND);
+        
+        // YIELD_VALUE: Yield control back to event loop
+        emit(Opcode::YIELD_VALUE);
+        
+        // RESUME 3: Resume after yield (async for context)
+        emit(Opcode::RESUME, 3);
+        
+        // Jump back to SEND to continue awaiting
+        emit(Opcode::JUMP_BACKWARD_NO_INTERRUPT, code().current_offset() - (send_jump - 2));
+        
+        // Patch SEND to jump here when value is ready
+        patch_jump(send_jump);
+        
+        // Store the yielded value in the target
+        compile_store_target(node->target().get());
+        
+        // Compile the loop body
+        for (const auto& stmt : node->body()) {
+            compile_stmt(stmt.get());
+        }
+        
+        // Jump back to GET_ANEXT to get next value
+        emit(Opcode::JUMP_BACKWARD, code().current_offset() - loop_start);
+        
+        // END_ASYNC_FOR: Cleanup when StopAsyncIteration is raised
+        emit(Opcode::END_ASYNC_FOR);
+        
+        // Compile else clause (executed if loop completes normally)
+        if (!node->orelse().empty()) {
+            for (const auto& stmt : node->orelse()) {
+                compile_stmt(stmt.get());
+            }
+        }
+        
+        // Patch break statements to jump here
         auto& loop_info = current_scope().loops.top();
         for (int idx : loop_info.break_patches) {
             patch_jump(idx);

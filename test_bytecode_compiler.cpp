@@ -185,6 +185,22 @@ with open("a.txt") as a, open("b.txt") as b:
     data = a.read() + b.read()
 )", "Multiple Context Managers");
 
+    // Test 24: Async for loop
+    test_compile(R"(
+async def process():
+    async for item in async_iter():
+        print(item)
+)", "Async For Loop");
+
+    // Test 25: Async for with else
+    test_compile(R"(
+async def process():
+    async for x in items:
+        print(x)
+    else:
+        print("done")
+)", "Async For with Else");
+
     std::cout << "=== All tests completed ===\n";
     return 0;
 }
