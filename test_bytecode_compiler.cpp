@@ -185,6 +185,52 @@ with open("a.txt") as a, open("b.txt") as b:
     data = a.read() + b.read()
 )", "Multiple Context Managers");
 
+    // Test 24: Async for loop
+    test_compile(R"(
+async def process():
+    async for item in async_iter():
+        print(item)
+)", "Async For Loop");
+
+    // Test 25: Async for with else
+    test_compile(R"(
+async def process():
+    async for x in items:
+        print(x)
+    else:
+        print("done")
+)", "Async For with Else");
+
+    // Test 26: Simple yield
+    test_compile(R"(
+def gen():
+    yield 1
+    yield 2
+    yield 3
+)", "Simple Yield");
+
+    // Test 27: Yield with value
+    test_compile(R"(
+def counter(n):
+    i = 0
+    while i < n:
+        yield i
+        i = i + 1
+)", "Yield in Loop");
+
+    // Test 28: Yield from
+    test_compile(R"(
+def delegator():
+    yield from subgen()
+)", "Yield From");
+
+    // Test 29: Yield from with list
+    test_compile(R"(
+def flatten(items):
+    for item in items:
+        yield from item
+)", "Yield From in Loop");
+
     std::cout << "=== All tests completed ===\n";
     return 0;
 }

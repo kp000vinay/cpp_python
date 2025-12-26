@@ -125,6 +125,8 @@ public:
             compile_while(node);
         } else if (auto* node = dynamic_cast<ast::For*>(stmt)) {
             compile_for(node);
+        } else if (auto* node = dynamic_cast<ast::AsyncFor*>(stmt)) {
+            compile_async_for(node);
         } else if (auto* node = dynamic_cast<ast::TryStar*>(stmt)) {
             compile_try_star(node);
         } else if (auto* node = dynamic_cast<ast::Try*>(stmt)) {
@@ -208,6 +210,8 @@ public:
             compile_await(node);
         } else if (auto* node = dynamic_cast<ast::Yield*>(expr)) {
             compile_yield(node);
+        } else if (auto* node = dynamic_cast<ast::YieldFrom*>(expr)) {
+            compile_yield_from(node);
         } else if (auto* node = dynamic_cast<ast::NamedExpr*>(expr)) {
             compile_namedexpr(node);
         } else if (auto* node = dynamic_cast<ast::Starred*>(expr)) {
@@ -502,6 +506,96 @@ private:
             }
         }
         
+        auto& loop_info = current_scope().loops.top();
+        for (int idx : loop_info.break_patches) {
+            patch_jump(idx);
+        }
+        
+        current_scope().loops.pop();
+    }
+    
+    /**
+     * Compile an async for loop
+     * 
+     * Python: async for TARGET in ITER:
+     *             BODY
+     *         else:
+     *             ORELSE
+     * 
+     * Bytecode pattern (CPython 3.11+):
+     *   ITER                    # Evaluate async iterable
+     *   GET_AITER               # Get async iterator
+     * loop_start:
+     *   GET_ANEXT               # Get next awaitable
+     *   LOAD_CONST None
+     *   SEND to_store           # Await the next value
+     *   YIELD_VALUE             # Yield control
+     *   RESUME 3
+     *   JUMP_BACKWARD to SEND
+     * to_store:
+     *   STORE TARGET            # Store the value
+     *   BODY                    # Execute body
+     *   JUMP_BACKWARD loop_start
+     * end:
+     *   END_ASYNC_FOR           # Cleanup async iterator
+     *   ORELSE                  # Execute else clause (if any)
+     */
+    void compile_async_for(ast::AsyncFor* node) {
+        // Evaluate the async iterable
+        compile_expr(node->iter().get());
+        
+        // GET_AITER: Get async iterator from the iterable
+        emit(Opcode::GET_AITER);
+        
+        // Mark the start of the loop
+        int loop_start = code().current_offset();
+        
+        // Push loop context for break/continue handling
+        current_scope().loops.push({loop_start, {}, {}});
+        
+        // GET_ANEXT: Get next awaitable from async iterator
+        emit(Opcode::GET_ANEXT);
+        
+        // Load None for SEND
+        emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
+        
+        // SEND: Await the next value (jumps to store on completion)
+        int send_jump = emit_jump(Opcode::SEND);
+        
+        // YIELD_VALUE: Yield control back to event loop
+        emit(Opcode::YIELD_VALUE);
+        
+        // RESUME 3: Resume after yield (async for context)
+        emit(Opcode::RESUME, 3);
+        
+        // Jump back to SEND to continue awaiting
+        emit(Opcode::JUMP_BACKWARD_NO_INTERRUPT, code().current_offset() - (send_jump - 2));
+        
+        // Patch SEND to jump here when value is ready
+        patch_jump(send_jump);
+        
+        // Store the yielded value in the target
+        compile_store_target(node->target().get());
+        
+        // Compile the loop body
+        for (const auto& stmt : node->body()) {
+            compile_stmt(stmt.get());
+        }
+        
+        // Jump back to GET_ANEXT to get next value
+        emit(Opcode::JUMP_BACKWARD, code().current_offset() - loop_start);
+        
+        // END_ASYNC_FOR: Cleanup when StopAsyncIteration is raised
+        emit(Opcode::END_ASYNC_FOR);
+        
+        // Compile else clause (executed if loop completes normally)
+        if (!node->orelse().empty()) {
+            for (const auto& stmt : node->orelse()) {
+                compile_stmt(stmt.get());
+            }
+        }
+        
+        // Patch break statements to jump here
         auto& loop_info = current_scope().loops.top();
         for (int idx : loop_info.break_patches) {
             patch_jump(idx);
@@ -1123,13 +1217,84 @@ private:
         emit(Opcode::YIELD_VALUE);
     }
     
+    /**
+     * Compile a yield expression
+     * 
+     * Python: yield VALUE
+     * 
+     * Bytecode pattern:
+     *   VALUE (or LOAD_CONST None if no value)
+     *   YIELD_VALUE
+     *   RESUME 1
+     *   (result of send() is on stack)
+     */
     void compile_yield(ast::Yield* node) {
+        // Load the value to yield (or None if no value)
         if (node->value()) {
             compile_expr(node->value().get());
         } else {
-            emit(Opcode::LOAD_CONST, 0);
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
         }
+        
+        // YIELD_VALUE: Suspend and yield the value
         emit(Opcode::YIELD_VALUE);
+        
+        // RESUME 1: Resume point after yield (generator context)
+        emit(Opcode::RESUME, 1);
+        
+        // The result of send() is now on the stack
+        // If yield is used as a statement, caller will POP_TOP
+    }
+    
+    /**
+     * Compile a yield from expression (generator delegation)
+     * 
+     * Python: yield from ITERABLE
+     * 
+     * Bytecode pattern (CPython 3.11+):
+     *   ITERABLE                    # Evaluate the iterable
+     *   GET_YIELD_FROM_ITER         # Get iterator for delegation
+     *   LOAD_CONST None             # Initial send value
+     * loop:
+     *   SEND end                    # Send value to sub-iterator
+     *   YIELD_VALUE                 # Yield the value
+     *   RESUME 2                    # Resume (yield from context)
+     *   JUMP_BACKWARD_NO_INTERRUPT loop
+     * end:
+     *   POP_TOP                     # Pop the final result
+     *   (result of sub-generator is on stack)
+     */
+    void compile_yield_from(ast::YieldFrom* node) {
+        // Evaluate the iterable to delegate to
+        compile_expr(node->value().get());
+        
+        // GET_YIELD_FROM_ITER: Get an iterator suitable for yield from
+        // This handles both generators and other iterables
+        emit(Opcode::GET_YIELD_FROM_ITER);
+        
+        // Load None as the initial value to send
+        emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
+        
+        // Mark the start of the send loop
+        int send_start = code().current_offset();
+        
+        // SEND: Send value to sub-iterator, jump to end on StopIteration
+        int send_jump = emit_jump(Opcode::SEND);
+        
+        // YIELD_VALUE: Yield the value from sub-iterator
+        emit(Opcode::YIELD_VALUE);
+        
+        // RESUME 2: Resume point (yield from context)
+        emit(Opcode::RESUME, 2);
+        
+        // Jump back to SEND to continue delegation
+        emit(Opcode::JUMP_BACKWARD_NO_INTERRUPT, code().current_offset() - send_start);
+        
+        // Patch SEND to jump here when sub-iterator is exhausted
+        patch_jump(send_jump);
+        
+        // The return value of the sub-generator is now on the stack
+        // (StopIteration.value)
     }
     
     void compile_namedexpr(ast::NamedExpr* node) {
