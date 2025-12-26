@@ -83,6 +83,7 @@ declare -a CATEGORIES=(
     "tests/with_statements"
     "tests/async_for"
     "tests/yield_expressions"
+    "tests/comprehensions"
 )
 
 for category in "${CATEGORIES[@]}"; do
