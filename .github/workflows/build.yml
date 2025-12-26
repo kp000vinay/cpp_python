@@ -1,0 +1,153 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }} with ${{ matrix.compiler }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Ubuntu with GCC
+          - os: ubuntu-latest
+            compiler: gcc
+            cc: gcc-12
+            cxx: g++-12
+            
+          # Ubuntu with Clang
+          - os: ubuntu-latest
+            compiler: clang
+            cc: clang-15
+            cxx: clang++-15
+            
+          # macOS with Apple Clang
+          - os: macos-latest
+            compiler: apple-clang
+            cc: clang
+            cxx: clang++
+            
+          # macOS with GCC
+          - os: macos-latest
+            compiler: gcc
+            cc: gcc-13
+            cxx: g++-13
+            
+          # Windows with MSVC
+          - os: windows-latest
+            compiler: msvc
+            cc: cl
+            cxx: cl
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install GCC 12 (Ubuntu)
+        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'gcc'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++-12
+
+      - name: Install Clang 15 (Ubuntu)
+        if: matrix.os == 'ubuntu-latest' && matrix.compiler == 'clang'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-15
+
+      - name: Install GCC 13 (macOS)
+        if: matrix.os == 'macos-latest' && matrix.compiler == 'gcc'
+        run: |
+          brew install gcc@13
+
+      - name: Setup MSVC (Windows)
+        if: matrix.os == 'windows-latest'
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Build (Unix)
+        if: matrix.os != 'windows-latest'
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          $CXX --version
+          $CXX -std=c++20 -O2 -I. main.cpp -o cpp_parser
+
+      - name: Build (Windows)
+        if: matrix.os == 'windows-latest'
+        run: |
+          cl /std:c++20 /O2 /I. /EHsc main.cpp /Fe:cpp_parser.exe
+
+      - name: Run Tests (Unix)
+        if: matrix.os != 'windows-latest'
+        run: |
+          chmod +x run_tests.sh
+          ./run_tests.sh
+
+      - name: Run Tests (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          $total = 0
+          $passed = 0
+          $failed = 0
+          
+          $testDirs = @(
+            "tests/expressions",
+            "tests/statements", 
+            "tests/functions",
+            "tests/classes",
+            "tests/control_flow",
+            "tests/operators",
+            "tests/comprehensions",
+            "tests/decorators",
+            "tests/imports",
+            "tests/exceptions",
+            "tests/async",
+            "tests/match",
+            "tests/type_alias",
+            "tests/starred_expressions",
+            "tests/except_star",
+            "tests/fstrings",
+            "tests/generics"
+          )
+          
+          foreach ($dir in $testDirs) {
+            if (Test-Path $dir) {
+              Get-ChildItem -Path $dir -Filter "*.py" | ForEach-Object {
+                $total++
+                $result = & ./cpp_parser.exe $_.FullName 2>&1
+                if ($LASTEXITCODE -eq 0) {
+                  $passed++
+                  Write-Host "PASS: $($_.FullName)" -ForegroundColor Green
+                } else {
+                  $failed++
+                  Write-Host "FAIL: $($_.FullName)" -ForegroundColor Red
+                }
+              }
+            }
+          }
+          
+          Write-Host ""
+          Write-Host "Total tests: $total"
+          Write-Host "Passed: $passed"
+          Write-Host "Failed: $failed"
+          
+          if ($failed -gt 0) {
+            exit 1
+          }
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cpp_parser-${{ matrix.os }}-${{ matrix.compiler }}
+          path: |
+            cpp_parser
+            cpp_parser.exe
+          if-no-files-found: ignore
