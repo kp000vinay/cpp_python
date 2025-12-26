@@ -201,6 +201,36 @@ async def process():
         print("done")
 )", "Async For with Else");
 
+    // Test 26: Simple yield
+    test_compile(R"(
+def gen():
+    yield 1
+    yield 2
+    yield 3
+)", "Simple Yield");
+
+    // Test 27: Yield with value
+    test_compile(R"(
+def counter(n):
+    i = 0
+    while i < n:
+        yield i
+        i = i + 1
+)", "Yield in Loop");
+
+    // Test 28: Yield from
+    test_compile(R"(
+def delegator():
+    yield from subgen()
+)", "Yield From");
+
+    // Test 29: Yield from with list
+    test_compile(R"(
+def flatten(items):
+    for item in items:
+        yield from item
+)", "Yield From in Loop");
+
     std::cout << "=== All tests completed ===\n";
     return 0;
 }

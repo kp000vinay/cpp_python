@@ -210,6 +210,8 @@ public:
             compile_await(node);
         } else if (auto* node = dynamic_cast<ast::Yield*>(expr)) {
             compile_yield(node);
+        } else if (auto* node = dynamic_cast<ast::YieldFrom*>(expr)) {
+            compile_yield_from(node);
         } else if (auto* node = dynamic_cast<ast::NamedExpr*>(expr)) {
             compile_namedexpr(node);
         } else if (auto* node = dynamic_cast<ast::Starred*>(expr)) {
@@ -1215,13 +1217,84 @@ private:
         emit(Opcode::YIELD_VALUE);
     }
     
+    /**
+     * Compile a yield expression
+     * 
+     * Python: yield VALUE
+     * 
+     * Bytecode pattern:
+     *   VALUE (or LOAD_CONST None if no value)
+     *   YIELD_VALUE
+     *   RESUME 1
+     *   (result of send() is on stack)
+     */
     void compile_yield(ast::Yield* node) {
+        // Load the value to yield (or None if no value)
         if (node->value()) {
             compile_expr(node->value().get());
         } else {
-            emit(Opcode::LOAD_CONST, 0);
+            emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
         }
+        
+        // YIELD_VALUE: Suspend and yield the value
         emit(Opcode::YIELD_VALUE);
+        
+        // RESUME 1: Resume point after yield (generator context)
+        emit(Opcode::RESUME, 1);
+        
+        // The result of send() is now on the stack
+        // If yield is used as a statement, caller will POP_TOP
+    }
+    
+    /**
+     * Compile a yield from expression (generator delegation)
+     * 
+     * Python: yield from ITERABLE
+     * 
+     * Bytecode pattern (CPython 3.11+):
+     *   ITERABLE                    # Evaluate the iterable
+     *   GET_YIELD_FROM_ITER         # Get iterator for delegation
+     *   LOAD_CONST None             # Initial send value
+     * loop:
+     *   SEND end                    # Send value to sub-iterator
+     *   YIELD_VALUE                 # Yield the value
+     *   RESUME 2                    # Resume (yield from context)
+     *   JUMP_BACKWARD_NO_INTERRUPT loop
+     * end:
+     *   POP_TOP                     # Pop the final result
+     *   (result of sub-generator is on stack)
+     */
+    void compile_yield_from(ast::YieldFrom* node) {
+        // Evaluate the iterable to delegate to
+        compile_expr(node->value().get());
+        
+        // GET_YIELD_FROM_ITER: Get an iterator suitable for yield from
+        // This handles both generators and other iterables
+        emit(Opcode::GET_YIELD_FROM_ITER);
+        
+        // Load None as the initial value to send
+        emit(Opcode::LOAD_CONST, code().add_const(std::monostate{}));
+        
+        // Mark the start of the send loop
+        int send_start = code().current_offset();
+        
+        // SEND: Send value to sub-iterator, jump to end on StopIteration
+        int send_jump = emit_jump(Opcode::SEND);
+        
+        // YIELD_VALUE: Yield the value from sub-iterator
+        emit(Opcode::YIELD_VALUE);
+        
+        // RESUME 2: Resume point (yield from context)
+        emit(Opcode::RESUME, 2);
+        
+        // Jump back to SEND to continue delegation
+        emit(Opcode::JUMP_BACKWARD_NO_INTERRUPT, code().current_offset() - send_start);
+        
+        // Patch SEND to jump here when sub-iterator is exhausted
+        patch_jump(send_jump);
+        
+        // The return value of the sub-generator is now on the stack
+        // (StopIteration.value)
     }
     
     void compile_namedexpr(ast::NamedExpr* node) {
